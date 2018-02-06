@@ -51,11 +51,11 @@ when isMainModule:
   import "../combparser/combparser"
   import lists
 
-  proc ignorefirst(first, catch: StringParser[string]): StringParser[string] =
-    (first + catch).map(proc(input: tuple[f1, f2: string]): string = input.f2) / catch
+  proc ignorefirst[T](first: StringParser[string], catch: StringParser[T]): StringParser[T] =
+    (first + catch).map(proc(input: tuple[f1: string, f2: T]): T = input.f2) / catch
 
-  proc ignorelast(catch, last: StringParser[string]): StringParser[string] =
-    (catch + last).map(proc(input: tuple[f1, f2: string]): string = input.f1) / catch
+  proc ignorelast[T](catch: StringParser[T], last: StringParser[string]): StringParser[T] =
+    (catch + last).map(proc(input: tuple[f1: T, f2: string]): T = input.f1) / catch
 
   proc andor(first, last: StringParser[string]): StringParser[string] =
     (first + last).map(proc(input: tuple[f1, f2: string]): string = input.f1 & input.f2) /
@@ -118,7 +118,7 @@ when isMainModule:
     ProtoType = enum
       Field, Enum, EnumVal, ReservedBlock, Reserved, Message, File
     ReservedType = enum
-      String, Number
+      String, Number, Range
     ProtoNode = ref object
       case kind*: ProtoType
       of Field:
@@ -139,6 +139,9 @@ when isMainModule:
           strVal: string
         of ReservedType.Number:
           intVal: int
+        of ReservedType.Range:
+          startVal: int
+          endVal: int
       of Message:
         messageName: string
         reserved: seq[ProtoNode]
@@ -180,6 +183,9 @@ when isMainModule:
           of ReservedType.Number:
             "Reserved field index $1".format(
               node.intVal)
+          of ReservedType.Range:
+            "Reserved field index from $1 to $2".format(
+              node.startVal, node.endVal)
       of Message:
         result = "Message $1 with reserved fields:\n".format(
           node.messageName)
@@ -213,17 +219,30 @@ when isMainModule:
       result = ProtoNode(kind: Field, number: parseInt(input[0][1]), name: input[0][0][0][1], protoType: input[0][0][0][0])
   )
 
-  proc reserved(): StringParser[ProtoNode] = (token("reserved") + ((number().ignorelast(ws(","))).repeat(1) / (str().ignorelast(ws(","))).repeat(1)) + endstatement()).map(
-    proc (rtuple: ((string, seq[string]), string)): ProtoNode =
-      result = ProtoNode(kind: ReservedBlock, resValues: @[])
-      var num: int
-      for reserved in rtuple[0][1]:
-        try:
-          num = parseInt(reserved)
-          result.resValues.add ProtoNode(kind: Reserved, reservedKind: ReservedType.Number, intVal: num)
-        except:
-          result.resValues.add ProtoNode(kind: Reserved, reservedKind: ReservedType.String, strVal: reserved)
-  )
+  proc reserved(): StringParser[ProtoNode] =
+    (token("reserved") + (((number() + ws("to") + (number() / ws("max"))).ignorelast(ws(",")).map(
+      proc (input: auto): ProtoNode =
+        let
+          f = parseInt(input[0][0])
+          t = if input[1] == "max": Natural.high else: parseInt(input[1])
+        ProtoNode(kind: Reserved, reservedKind: ReservedType.Range, startVal: f, endVal: t)
+    ) / (number().ignorelast(ws(","))).map(
+      proc (input: auto): ProtoNode =
+        ProtoNode(kind: Reserved, reservedKind: ReservedType.Number, intVal: parseInt(input))
+    )).repeat(1).map(
+      proc (input: auto): ProtoNode =
+        result = ProtoNode(kind: ReservedBlock, resValues: @[])
+        for reserved in input:
+          result.resValues.add reserved
+    ) / (str().ignorelast(ws(","))).repeat(1).map(
+      proc (input: auto): ProtoNode =
+        result = ProtoNode(kind: ReservedBlock, resValues: @[])
+        for str in input:
+          result.resValues.add ProtoNode(kind: Reserved, reservedKind: ReservedType.String, strVal: str)
+    )) + endstatement()).map(
+      proc (input: auto): ProtoNode =
+        input[0][1]
+    )
 
   proc enumvals(): StringParser[ProtoNode] = (enumname() + ws("=") + number() + endstatement()).map(
     proc (input: auto): ProtoNode =
@@ -262,6 +281,7 @@ when isMainModule:
   echo parse(declaration(), "int32 syntax = 5;")
   echo parse(reserved(), "reserved 5;")
   echo parse(reserved(), "reserved 5, 7;")
+  echo parse(reserved(), "reserved 5, 7 to max;")
   echo parse(reserved(), "reserved \"foo\";")
   echo parse(reserved(), "reserved \"foo\", \"bar\";")
   echo parse(enumvals(), "TEST = 4;")
