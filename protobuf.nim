@@ -125,6 +125,7 @@ when isMainModule:
         number: int
         protoType: string
         name: string
+        repeated: bool
       of Enum:
         enumName: string
         values: seq[ProtoNode]
@@ -147,6 +148,7 @@ when isMainModule:
         reserved: seq[ProtoNode]
         definedEnums: seq[ProtoNode]
         fields: seq[ProtoNode]
+        nested: seq[ProtoNode]
       of File:
         syntax: string
         messages: seq[ProtoNode]
@@ -158,6 +160,8 @@ when isMainModule:
           node.name,
           node.protoType,
           node.number)
+        if node.repeated:
+          result &= " is repeated"
       of Enum:
         result = "Enum $1 has values:\n".format(
           node.enumName)
@@ -214,9 +218,9 @@ when isMainModule:
       stuple[0][1]
   )
 
-  proc declaration(): StringParser[ProtoNode] = ((token() / class()) + token() + ws("=") + number() + endstatement()).map(
+  proc declaration(): StringParser[ProtoNode] = (optional(ws("repeated")) + (token() / class()) + token() + ws("=") + number() + endstatement()).map(
     proc (input: auto): ProtoNode =
-      result = ProtoNode(kind: Field, number: parseInt(input[0][1]), name: input[0][0][0][1], protoType: input[0][0][0][0])
+      result = ProtoNode(kind: Field, number: parseInt(input[0][1]), name: input[0][0][0][1], protoType: input[0][0][0][0][1], repeated: input[0][0][0][0][0] != nil)
   )
 
   proc reserved(): StringParser[ProtoNode] =
@@ -256,7 +260,7 @@ when isMainModule:
 
   proc messageblock(): StringParser[ProtoNode] = (token("message") + class() + ws("{") + (declaration() / reserved() / enumblock()).repeat(0) + ws("}")).map(
     proc (input: auto): ProtoNode =
-      result = ProtoNode(kind: Message, messageName: input[0][0][0][1], reserved: @[], definedEnums: @[], fields: @[])
+      result = ProtoNode(kind: Message, messageName: input[0][0][0][1], reserved: @[], definedEnums: @[], fields: @[], nested: @[])
       for thing in input[0][1]:
         case thing.kind:
         of ReservedBlock:
@@ -265,6 +269,8 @@ when isMainModule:
           result.definedEnums.add thing
         of Field:
           result.fields.add thing
+        of Message:
+          result.nested.add thing
         else:
           continue
   )
@@ -277,6 +283,8 @@ when isMainModule:
   )
 
   #echo parse(ignorefirst(comment(), s("syntax")) , "syntax = \"This is syntax\";")
+  echo parse(optional(ws("hello")) + ws("world"), "hello world")
+  echo parse(optional(ws("hello")) + ws("world"), " world")
   echo parse(syntaxline(), "syntax = \"This is syntax\";")
   echo parse(declaration(), "int32 syntax = 5;")
   echo parse(reserved(), "reserved 5;")
