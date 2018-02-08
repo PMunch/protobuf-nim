@@ -18,4 +18,16 @@ message SearchRequest {
     VIDEO = 6;
   }
   Corpus corpus = 4;
+  message SubMessage {
+    reserved "hello", "world";
+    string query = 1;
+    int32 query_count = 2;
+    enum Langs {
+      UNIVERSAL = 0;
+      NIM = 1;
+      C = 2;
+      CPP = 3;
+      PYTHON = 4;
+    }
+  }
 }

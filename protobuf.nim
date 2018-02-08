@@ -191,20 +191,34 @@ when isMainModule:
             "Reserved field index from $1 to $2".format(
               node.startVal, node.endVal)
       of Message:
-        result = "Message $1 with reserved fields:\n".format(
+        result = "Message $1 with data:".format(
           node.messageName)
-        var reserved = ""
-        for res in node.reserved:
-          reserved &= $res & "\n"
-        result &= reserved[0..^2].indent(1, "  ")
-        var enums = "\n"
-        for definedEnum in node.definedEnums:
-          enums &= $definedEnum & "\n"
-        result &= enums[0..^2].indent(1, "  ")
-        var fields = "\n"
-        for field in node.fields:
-          fields &= $field & "\n"
-        result &= fields[0..^2].indent(1, "  ")
+        var data = ""
+        if node.reserved.len != 0:
+          data &= "\nReserved fields:"
+          var reserved = "\n"
+          for res in node.reserved:
+            reserved &= $res & "\n"
+          data &= reserved[0..^2].indent(1, "  ")
+        if node.definedEnums.len != 0:
+          data &= "\nEnumerable definitions:"
+          var enums = "\n"
+          for definedEnum in node.definedEnums:
+            enums &= $definedEnum & "\n"
+          data &= enums[0..^2].indent(1, "  ")
+        if node.fields.len != 0:
+          data &= "\nDefined fields:"
+          var fields = "\n"
+          for field in node.fields:
+            fields &= $field & "\n"
+          data &= fields[0..^2].indent(1, "  ")
+        if node.nested.len != 0:
+          data &= "\nAnd nested messages:"
+          var messages = "\n"
+          for message in node.nested:
+            messages &= $message & "\n"
+          data &= messages[0..^2].indent(1, "  ")
+        result &= data.indent(1, "  ")
       of File:
         result = "Protobuf file with syntax $1 and messages:\n".format(
           node.syntax)
@@ -258,7 +272,12 @@ when isMainModule:
       result = ProtoNode(kind: Enum, enumName: input[0][0][0][1], values: input[0][1])
   )
 
-  proc messageblock(): StringParser[ProtoNode] = (token("message") + class() + ws("{") + (declaration() / reserved() / enumblock()).repeat(0) + ws("}")).map(
+  proc messageblock(): StringParser[ProtoNode] = (token("message") + class() + ws("{") + (declaration() / reserved() / enumblock() / token("message").flatMap(
+    proc(msg: string): StringParser[ProtoNode] =
+      (proc (rest: string): Maybe[(ProtoNode, string), string] =
+        messageblock()(msg & " " & rest)
+      )
+  )).repeat(0) + ws("}")).map(
     proc (input: auto): ProtoNode =
       result = ProtoNode(kind: Message, messageName: input[0][0][0][1], reserved: @[], definedEnums: @[], fields: @[], nested: @[])
       for thing in input[0][1]:
