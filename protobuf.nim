@@ -127,7 +127,7 @@ when isMainModule:
       repeated: bool
     ProtoEnum = ref object
       name: string
-      values: seq[ProtoNode]
+      values: seq[ProtoEnumField]
     ProtoEnumField = ref object
       name: string
       number: int
@@ -143,7 +143,7 @@ when isMainModule:
         startVal: int
         endVal: int
     ProtoMessage = ref object
-      messageName: string
+      name: string
       reserved: seq[ProtoReserved]
       definedEnums: seq[ProtoEnum]
       fields: seq[ProtoField]
@@ -151,184 +151,151 @@ when isMainModule:
     ProtoFile = ref object
       syntax: string
       messages: seq[ProtoMessage]
-    ProtoNode = ProtoField or ProtoEnum or ProtoEnumField or ProtoReserved or ProtoReserved or ProtoReservedField or ProtoMessage or ProtoFile
+    ProtoTest = ProtoReserved or ProtoField
+    StringParserTest = StringParser[ProtoReserved] or StringParser[ProtoField]
+    #ProtoNode = ProtoField or ProtoEnum or ProtoEnumField or ProtoReserved or ProtoReserved or ProtoReservedField or ProtoMessage or ProtoFile
 
-    ProtoType = enum
-      Field, Enum, EnumVal, ReservedBlock, Reserved, Message, File
-    ProtoNode = ref object
-      case kind*: ProtoType
-      of Field:
-        number: int
-        protoType: string
-        name: string
-        repeated: bool
-      of Enum:
-        enumName: string
-        values: seq[ProtoNode]
-      of EnumVal:
-        fieldName: string
-        num: int
-      of ReservedBlock:
-        resValues: seq[ProtoNode]
-      of Reserved:
-        case reservedKind*: ReservedType
-        of ReservedType.String:
-          strVal: string
-        of ReservedType.Number:
-          intVal: int
-        of ReservedType.Range:
-          startVal: int
-          endVal: int
-      of Message:
-        messageName: string
-        reserved: seq[ProtoNode]
-        definedEnums: seq[ProtoNode]
-        fields: seq[ProtoNode]
-        nested: seq[ProtoNode]
-      of File:
-        syntax: string
-        messages: seq[ProtoNode]
+  proc `$`(node: ProtoField): string =
+    result = "Field $1 of type $2 with index $3".format(
+      node.name,
+      node.kind,
+      node.number)
+    if node.repeated:
+      result &= " is repeated"
 
-  proc `$`(node: ProtoNode): string =
-    case node.kind:
-      of Field:
-        result = "Field $1 of type $2 with index $3".format(
-          node.name,
-          node.protoType,
-          node.number)
-        if node.repeated:
-          result &= " is repeated"
-      of Enum:
-        result = "Enum $1 has values:\n".format(
-          node.enumName)
-        var fields = ""
-        for field in node.values:
-          fields &= $field & "\n"
-        result &= fields[0..^2].indent(1, "  ")
-      of EnumVal:
-        result = "Enum field $1 with index $2".format(
-          node.fieldName,
-          node.num)
-      of ReservedBlock:
-        result = "Reserved values:\n"
-        var reserved = ""
-        for value in node.resValues:
-          reserved &= $value & "\n"
-        result &= reserved.indent(1, "  ")
-      of Reserved:
-        result = case node.reservedKind:
-          of ReservedType.String:
-            "Reserved field name $1".format(
-              node.strVal)
-          of ReservedType.Number:
-            "Reserved field index $1".format(
-              node.intVal)
-          of ReservedType.Range:
-            "Reserved field index from $1 to $2".format(
-              node.startVal, node.endVal)
-      of Message:
-        result = "Message $1 with data:".format(
-          node.messageName)
-        var data = ""
-        if node.reserved.len != 0:
-          data &= "\nReserved fields:"
-          var reserved = "\n"
-          for res in node.reserved:
-            reserved &= $res & "\n"
-          data &= reserved[0..^2].indent(1, "  ")
-        if node.definedEnums.len != 0:
-          data &= "\nEnumerable definitions:"
-          var enums = "\n"
-          for definedEnum in node.definedEnums:
-            enums &= $definedEnum & "\n"
-          data &= enums[0..^2].indent(1, "  ")
-        if node.fields.len != 0:
-          data &= "\nDefined fields:"
-          var fields = "\n"
-          for field in node.fields:
-            fields &= $field & "\n"
-          data &= fields[0..^2].indent(1, "  ")
-        if node.nested.len != 0:
-          data &= "\nAnd nested messages:"
-          var messages = "\n"
-          for message in node.nested:
-            messages &= $message & "\n"
-          data &= messages[0..^2].indent(1, "  ")
-        result &= data.indent(1, "  ")
-      of File:
-        result = "Protobuf file with syntax $1 and messages:\n".format(
-          node.syntax)
-        var body = ""
-        for message in node.messages:
-          body &= $message
-          result &= body.indent(1, "  ")
-          body = "\n"
+  proc `$`(node: ProtoEnumField): string =
+    result = "Enum field $1 with index $2".format(
+      node.name,
+      node.number)
+
+  proc `$`(node: ProtoEnum): string =
+    result = "Enum $1 has values:\n".format(
+      node.name)
+    var fields = ""
+    for field in node.values:
+      fields &= $field & "\n"
+    result &= fields[0..^2].indent(1, "  ")
+
+  proc `$`(node: ProtoReservedField): string =
+    result = case node.reservedKind:
+      of ReservedType.String:
+        "Reserved field name $1".format(
+          node.strVal)
+      of ReservedType.Number:
+        "Reserved field index $1".format(
+          node.intVal)
+      of ReservedType.Range:
+        "Reserved field index from $1 to $2".format(
+          node.startVal, node.endVal)
+
+  proc `$`(node: ProtoReserved): string =
+    result = "Reserved values:\n"
+    var reserved = ""
+    for value in node.reservedValues:
+      reserved &= $value & "\n"
+    result &= reserved.indent(1, "  ")
+
+  proc `$`(node: ProtoMessage): string =
+    result = "Message $1 with data:".format(
+      node.name)
+    var data = ""
+    if node.reserved.len != 0:
+      data &= "\nReserved fields:"
+      var reserved = "\n"
+      for res in node.reserved:
+        reserved &= $res & "\n"
+      data &= reserved[0..^2].indent(1, "  ")
+    if node.definedEnums.len != 0:
+      data &= "\nEnumerable definitions:"
+      var enums = "\n"
+      for definedEnum in node.definedEnums:
+        enums &= $definedEnum & "\n"
+      data &= enums[0..^2].indent(1, "  ")
+    if node.fields.len != 0:
+      data &= "\nDefined fields:"
+      var fields = "\n"
+      for field in node.fields:
+        fields &= $field & "\n"
+      data &= fields[0..^2].indent(1, "  ")
+    if node.nested.len != 0:
+      data &= "\nAnd nested messages:"
+      var messages = "\n"
+      for message in node.nested:
+        messages &= $message & "\n"
+      data &= messages[0..^2].indent(1, "  ")
+    result &= data.indent(1, "  ")
+
+  proc `$`(node: ProtoFile): string =
+    result = "Protobuf file with syntax $1 and messages:\n".format(
+      node.syntax)
+    var body = ""
+    for message in node.messages:
+      body &= $message
+      result &= body.indent(1, "  ")
+      body = "\n"
 
   proc syntaxline(): StringParser[string] = (token("syntax") + ws("=") + str() + endstatement()).map(
     proc (stuple: auto): string =
       stuple[0][1]
   )
 
-  proc declaration(): StringParser[ProtoNode] = (optional(ws("repeated")) + typespecifier() + token() + ws("=") + number() + endstatement()).map(
-    proc (input: auto): ProtoNode =
-      result = ProtoNode(kind: Field, number: parseInt(input[0][1]), name: input[0][0][0][1], protoType: input[0][0][0][0][1], repeated: input[0][0][0][0][0] != nil)
+  proc declaration(): StringParser[ProtoField] = (optional(ws("repeated")) + typespecifier() + token() + ws("=") + number() + endstatement()).map(
+    proc (input: auto): ProtoField =
+      result = ProtoField(number: parseInt(input[0][1]), name: input[0][0][0][1], kind: input[0][0][0][0][1], repeated: input[0][0][0][0][0] != nil)
   )
 
-  proc reserved(): StringParser[ProtoNode] =
+  proc reserved(): StringParser[ProtoReserved] =
     (token("reserved") + (((number() + ws("to") + (number() / ws("max"))).ignorelast(ws(",")).map(
-      proc (input: auto): ProtoNode =
+      proc (input: auto): ProtoReservedField =
         let
           f = parseInt(input[0][0])
           t = if input[1] == "max": Natural.high else: parseInt(input[1])
-        ProtoNode(kind: Reserved, reservedKind: ReservedType.Range, startVal: f, endVal: t)
+        ProtoReservedField(reservedKind: ReservedType.Range, startVal: f, endVal: t)
     ) / (number().ignorelast(ws(","))).map(
-      proc (input: auto): ProtoNode =
-        ProtoNode(kind: Reserved, reservedKind: ReservedType.Number, intVal: parseInt(input))
+      proc (input: auto): ProtoReservedField =
+        ProtoReservedField(reservedKind: ReservedType.Number, intVal: parseInt(input))
     )).repeat(1).map(
-      proc (input: auto): ProtoNode =
-        result = ProtoNode(kind: ReservedBlock, resValues: @[])
+      proc (input: auto): ProtoReserved =
+        result = ProtoReserved(reservedValues: @[])
         for reserved in input:
-          result.resValues.add reserved
+          result.reservedValues.add reserved
     ) / (str().ignorelast(ws(","))).repeat(1).map(
-      proc (input: auto): ProtoNode =
-        result = ProtoNode(kind: ReservedBlock, resValues: @[])
+      proc (input: auto): ProtoReserved =
+        result = ProtoReserved(reservedValues: @[])
         for str in input:
-          result.resValues.add ProtoNode(kind: Reserved, reservedKind: ReservedType.String, strVal: str)
+          result.reservedValues.add ProtoReservedField(reservedKind: ReservedType.String, strVal: str)
     )) + endstatement()).map(
-      proc (input: auto): ProtoNode =
+      proc (input: auto): ProtoReserved =
         input[0][1]
     )
 
-  proc enumvals(): StringParser[ProtoNode] = (enumname() + ws("=") + number() + endstatement()).map(
-    proc (input: auto): ProtoNode =
-      result = ProtoNode(kind: EnumVal, fieldName: input[0][0][0], num: parseInt(input[0][1]))
+  proc enumvals(): StringParser[ProtoEnumField] = (enumname() + ws("=") + number() + endstatement()).map(
+    proc (input: auto): ProtoEnumField =
+      result = ProtoEnumField(name: input[0][0][0], number: parseInt(input[0][1]))
   )
 
-  proc enumblock(): StringParser[ProtoNode] = (token("enum") + class() + ws("{") + enumvals().repeat(1) + ws("}")).map(
-    proc (input: auto): ProtoNode =
-      result = ProtoNode(kind: Enum, enumName: input[0][0][0][1], values: input[0][1])
+  proc enumblock(): StringParser[ProtoEnum] = (token("enum") + class() + ws("{") + enumvals().repeat(1) + ws("}")).map(
+    proc (input: auto): ProtoEnum =
+      result = ProtoEnum(name: input[0][0][0][1], values: input[0][1])
   )
 
-  proc messageblock(): StringParser[ProtoNode] = (token("message") + class() + ws("{") + (declaration() / reserved() / enumblock() / token("message").flatMap(
-    proc(msg: string): StringParser[ProtoNode] =
-      (proc (rest: string): Maybe[(ProtoNode, string), string] =
+  proc messageblock(): StringParser[ProtoMessage] = (token("message") + class() + ws("{") + (declaration() / reserved() / enumblock() / token("message").flatMap(
+    proc(msg: string): StringParser[ProtoMessage] =
+      (proc (rest: string): Maybe[(ProtoMessage, string), string] =
         messageblock()(msg & " " & rest)
       )
     )).repeat(0) + ws("}")).map(
-      proc (input: auto): ProtoNode =
-        result = ProtoNode(kind: Message, messageName: input[0][0][0][1], reserved: @[], definedEnums: @[], fields: @[], nested: @[])
+      proc (input: auto): ProtoMessage =
+        result = ProtoMessage(name: input[0][0][0][1], reserved: @[], definedEnums: @[], fields: @[], nested: @[])
         for thing in input[0][1]:
-          case thing.kind:
-          of ReservedBlock:
+          when thing of ProtoReserved:
             result.reserved = result.reserved.concat(thing.resValues)
-          of Enum:
+          when thing of ProtoEnum:
             result.definedEnums.add thing
-          of Field:
+          when thing of ProtoField:
             result.fields.add thing
-          of Message:
+          when thing of Message:
             result.nested.add thing
-          else:
-            continue
     )
 
   proc protofile(): StringParser[ProtoNode] = (syntaxline() + messageblock().repeat(1)).map(
