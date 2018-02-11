@@ -120,39 +120,6 @@ when isMainModule:
   type
     ReservedType = enum
       String, Number, Range
-    ProtoField = ref object
-      number: int
-      kind: string
-      name: string
-      repeated: bool
-    ProtoEnum = ref object
-      name: string
-      values: seq[ProtoNode]
-    ProtoEnumField = ref object
-      name: string
-      number: int
-    ProtoReserved = ref object
-      reservedValues: seq[ProtoReservedField]
-    ProtoReservedField = ref object
-      case reservedKind*: ReservedType
-      of ReservedType.String:
-        strVal: string
-      of ReservedType.Number:
-        intVal: int
-      of ReservedType.Range:
-        startVal: int
-        endVal: int
-    ProtoMessage = ref object
-      messageName: string
-      reserved: seq[ProtoReserved]
-      definedEnums: seq[ProtoEnum]
-      fields: seq[ProtoField]
-      nested: seq[ProtoMessage]
-    ProtoFile = ref object
-      syntax: string
-      messages: seq[ProtoMessage]
-    ProtoNode = ProtoField or ProtoEnum or ProtoEnumField or ProtoReserved or ProtoReserved or ProtoReservedField or ProtoMessage or ProtoFile
-
     ProtoType = enum
       Field, Enum, EnumVal, ReservedBlock, Reserved, Message, File
     ProtoNode = ref object
