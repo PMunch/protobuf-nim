@@ -112,13 +112,49 @@ when isMainModule:
     ignorefirst(comment(), ws(name)).ignorelast(comment()).map(strip)
 
   proc class(): StringParser[string] =
-    ignorefirst(inlinecomment(), regex(r"\s*[A-Z][a-zA-Z0-9_]*\s*")).ignorelast(comment()).map(strip)
+    ignorefirst(comment(), regex(r"\s*[A-Z][a-zA-Z0-9_]*\s*")).ignorelast(comment()).map(strip)
+
+  proc typespecifier(): StringParser[string] =
+    ignorefirst(comment(), regex(r"\s*[A-Za-z0-9_\.]*\s*")).ignorelast(comment()).map(strip)
 
   type
-    ProtoType = enum
-      Field, Enum, EnumVal, ReservedBlock, Reserved, Message, File
     ReservedType = enum
       String, Number, Range
+    ProtoField = ref object
+      number: int
+      kind: string
+      name: string
+      repeated: bool
+    ProtoEnum = ref object
+      name: string
+      values: seq[ProtoNode]
+    ProtoEnumField = ref object
+      name: string
+      number: int
+    ProtoReserved = ref object
+      reservedValues: seq[ProtoReservedField]
+    ProtoReservedField = ref object
+      case reservedKind*: ReservedType
+      of ReservedType.String:
+        strVal: string
+      of ReservedType.Number:
+        intVal: int
+      of ReservedType.Range:
+        startVal: int
+        endVal: int
+    ProtoMessage = ref object
+      messageName: string
+      reserved: seq[ProtoReserved]
+      definedEnums: seq[ProtoEnum]
+      fields: seq[ProtoField]
+      nested: seq[ProtoMessage]
+    ProtoFile = ref object
+      syntax: string
+      messages: seq[ProtoMessage]
+    ProtoNode = ProtoField or ProtoEnum or ProtoEnumField or ProtoReserved or ProtoReserved or ProtoReservedField or ProtoMessage or ProtoFile
+
+    ProtoType = enum
+      Field, Enum, EnumVal, ReservedBlock, Reserved, Message, File
     ProtoNode = ref object
       case kind*: ProtoType
       of Field:
@@ -224,15 +260,16 @@ when isMainModule:
           node.syntax)
         var body = ""
         for message in node.messages:
-          body &= $message & "\n"
-        result &= body.indent(1, "  ")
+          body &= $message
+          result &= body.indent(1, "  ")
+          body = "\n"
 
   proc syntaxline(): StringParser[string] = (token("syntax") + ws("=") + str() + endstatement()).map(
     proc (stuple: auto): string =
       stuple[0][1]
   )
 
-  proc declaration(): StringParser[ProtoNode] = (optional(ws("repeated")) + (token() / class()) + token() + ws("=") + number() + endstatement()).map(
+  proc declaration(): StringParser[ProtoNode] = (optional(ws("repeated")) + typespecifier() + token() + ws("=") + number() + endstatement()).map(
     proc (input: auto): ProtoNode =
       result = ProtoNode(kind: Field, number: parseInt(input[0][1]), name: input[0][0][0][1], protoType: input[0][0][0][0][1], repeated: input[0][0][0][0][0] != nil)
   )
@@ -277,22 +314,22 @@ when isMainModule:
       (proc (rest: string): Maybe[(ProtoNode, string), string] =
         messageblock()(msg & " " & rest)
       )
-  )).repeat(0) + ws("}")).map(
-    proc (input: auto): ProtoNode =
-      result = ProtoNode(kind: Message, messageName: input[0][0][0][1], reserved: @[], definedEnums: @[], fields: @[], nested: @[])
-      for thing in input[0][1]:
-        case thing.kind:
-        of ReservedBlock:
-          result.reserved = result.reserved.concat(thing.resValues)
-        of Enum:
-          result.definedEnums.add thing
-        of Field:
-          result.fields.add thing
-        of Message:
-          result.nested.add thing
-        else:
-          continue
-  )
+    )).repeat(0) + ws("}")).map(
+      proc (input: auto): ProtoNode =
+        result = ProtoNode(kind: Message, messageName: input[0][0][0][1], reserved: @[], definedEnums: @[], fields: @[], nested: @[])
+        for thing in input[0][1]:
+          case thing.kind:
+          of ReservedBlock:
+            result.reserved = result.reserved.concat(thing.resValues)
+          of Enum:
+            result.definedEnums.add thing
+          of Field:
+            result.fields.add thing
+          of Message:
+            result.nested.add thing
+          else:
+            continue
+    )
 
   proc protofile(): StringParser[ProtoNode] = (syntaxline() + messageblock().repeat(1)).map(
     proc (input: auto): ProtoNode =
@@ -306,6 +343,8 @@ when isMainModule:
   echo parse(optional(ws("hello")) + ws("world"), " world")
   echo parse(syntaxline(), "syntax = \"This is syntax\";")
   echo parse(declaration(), "int32 syntax = 5;")
+  echo parse(typespecifier(), "This.Is.Atest")
+  echo parse(declaration(), "This.Is.Atest name = 5;")
   echo parse(reserved(), "reserved 5;")
   echo parse(reserved(), "reserved 5, 7;")
   echo parse(reserved(), "reserved 5, 7 to max;")
@@ -319,12 +358,68 @@ when isMainModule:
   }
   """")
 
-  var protoStr = readFile("proto3.prot")
-  echo parse(protofile(), protoStr)
-  #echo parse(regex(r"\s*/\*.*\*/\s*"), "/* THis is a test */")
-  #echo parse(regex(r"\s*//.*\s*").repeat(1).map(combine), """// This is a test
-  #// Test""")
+  var
+    protoStr = readFile("proto3.prot")
+    protoParsed = parse(protofile(), protoStr)
 
+  type ValidationError = object of Exception
+
+  type
+    Test1 = int
+    Test2 = string
+    Test3 = Test1 | Test2
+
+  proc t(b: Test1) =
+    echo "Int: " & $b
+
+  proc s(b: Test2) =
+    echo "String: " & b
+
+  proc c(b: Test3) =
+    when b is Test1:
+      t(b)
+    else:
+      s(b)
+
+  var
+    t1: Test1 = 6
+    t2: Test2 = "Hello"
+
+  c(t1)
+  c(t2)
+
+  proc ValidationAssert(statement: bool, error: string) =
+    if not statement:
+      raise newException(ValidationError, error)
+
+  proc getTypes(message: ProtoNode, parent = ""): seq[string] =
+    ValidationAssert(message.kind == Message, "ProtoBuf messages field contains something else than messages")
+    result = @[]
+    let name = (if parent != "": parent & "." else: "") & message.messageName
+    for definedEnum in message.definedEnums:
+      ValidationAssert(definedEnum.kind == Enum, "Field for defined enums contained something else than a message")
+      result.add name & "." & definedEnum.enumName
+    for innerMessage in message.nested:
+      result = result.concat innerMessage.getTypes(name)
+    result.add name
+
+  proc verifyReserved(message: ProtoNode): bool =
+    ValidationAssert(message.kind == Message, "ProtoBuf messages field contains something else than messages")
+    for field in message.fields:
+      ValidationAssert(field.kind == Field, "Field for defined fields contained something else than a field")
+
+  proc valid(proto: ProtoNode): bool =
+    ValidationAssert(proto.kind == File, "Validation must take an entire ProtoFile")
+    ValidationAssert(proto.syntax == "proto3", "File must follow proto3 syntax")
+    var validTypes = @["int32", "int64", "uint32", "uint64", "sint32", "sint64", "fixed32",
+      "fixed64", "sfixed32", "sfixed64", "bool", "bytes", "enum", "float", "double", "string"]
+    for message in proto.messages:
+      validTypes = validTypes.concat message.getTypes()
+    echo validTypes
+
+
+  if protoParsed.valid:
+    echo "File is valid!"
 
 
 when false:#isMainModule:

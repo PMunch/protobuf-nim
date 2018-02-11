@@ -31,3 +31,7 @@ message SearchRequest {
     }
   }
 }
+
+message Second {
+  SearchRequest.SubMessage.Langs test = 1;
+}
