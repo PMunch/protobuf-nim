@@ -370,10 +370,27 @@ when isMainModule:
       result = result.concat innerMessage.getTypes(name)
     result.add name
 
-  proc verifyReserved(message: ProtoNode): bool =
+  proc verifyReservedAndUnique(message: ProtoNode): bool =
     ValidationAssert(message.kind == Message, "ProtoBuf messages field contains something else than messages")
+    var
+      usedNames: seq[string] = @[]
+      usedIndices: seq[int] = @[]
     for field in message.fields:
       ValidationAssert(field.kind == Field, "Field for defined fields contained something else than a field")
+      ValidationAssert(field.name notin usedNames, "Field name already used")
+      ValidationAssert(field.number notin usedIndices, "Field number already used")
+      usedNames.add field.name
+      usedIndices.add field.number
+      for value in message.reserved:
+        ValidationAssert(value.kind == Reserved, "Field for reserved values contained something else than a reserved value")
+        case value.reservedKind:
+          of String:
+            ValidationAssert(value.strVal != field.name, "Field name in list of reserved names")
+          of Number:
+            ValidationAssert(value.intVal != field.number, "Field index in list of reserved indices")
+          of Range:
+            ValidationAssert(not(field.number >= value.startVal and field.number <= value.endVal), "Field index in list of reserved indices")
+    return true
 
   proc valid(proto: ProtoNode): bool =
     ValidationAssert(proto.kind == File, "Validation must take an entire ProtoFile")
@@ -381,6 +398,7 @@ when isMainModule:
     var validTypes = @["int32", "int64", "uint32", "uint64", "sint32", "sint64", "fixed32",
       "fixed64", "sfixed32", "sfixed64", "bool", "bytes", "enum", "float", "double", "string"]
     for message in proto.messages:
+      discard verifyReservedAndUnique(message)
       validTypes = validTypes.concat message.getTypes()
     echo validTypes
 
