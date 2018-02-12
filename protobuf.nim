@@ -155,6 +155,7 @@ when isMainModule:
       of File:
         syntax: string
         messages: seq[ProtoNode]
+        imported: seq[ProtoNode]
 
   proc `$`(node: ProtoNode): string =
     case node.kind:
@@ -355,7 +356,7 @@ when isMainModule:
   c(t1)
   c(t2)
 
-  proc ValidationAssert(statement: bool, error: string) =
+  template ValidationAssert(statement: bool, error: string) =
     if not statement:
       raise newException(ValidationError, error)
 
@@ -369,6 +370,14 @@ when isMainModule:
     for innerMessage in message.nested:
       result = result.concat innerMessage.getTypes(name)
     result.add name
+
+  proc verifyTypes(message: ProtoNode, validTypes: seq[string], parent = "") =
+    ValidationAssert(message.kind == Message, "ProtoBuf messages field contains something else than messages")
+    let name = (if parent != "": parent & "." else: "") & message.messageName
+    for field in message.fields:
+      ValidationAssert(field.protoType in validTypes or name & "." & field.protoType in validTypes, "Type does not exist in definition")
+    for innerMessage in message.nested:
+      verifyTypes(innerMessage, validTypes, name)
 
   proc verifyReservedAndUnique(message: ProtoNode): bool =
     ValidationAssert(message.kind == Message, "ProtoBuf messages field contains something else than messages")
@@ -390,6 +399,8 @@ when isMainModule:
             ValidationAssert(value.intVal != field.number, "Field index in list of reserved indices")
           of Range:
             ValidationAssert(not(field.number >= value.startVal and field.number <= value.endVal), "Field index in list of reserved indices")
+    for m in message.nested:
+      discard verifyReservedAndUnique(m)
     return true
 
   proc valid(proto: ProtoNode): bool =
@@ -400,6 +411,8 @@ when isMainModule:
     for message in proto.messages:
       discard verifyReservedAndUnique(message)
       validTypes = validTypes.concat message.getTypes()
+    for message in proto.messages:
+      verifyTypes(message, validTypes)
     echo validTypes
 
 
