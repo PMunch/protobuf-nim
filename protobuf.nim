@@ -121,7 +121,7 @@ when isMainModule:
     ReservedType = enum
       String, Number, Range
     ProtoType = enum
-      Field, Enum, EnumVal, ReservedBlock, Reserved, Message, File
+      Field, Enum, EnumVal, ReservedBlock, Reserved, Message, File, Imported, Oneof
     ProtoNode = ref object
       case kind*: ProtoType
       of Field:
@@ -129,6 +129,9 @@ when isMainModule:
         protoType: string
         name: string
         repeated: bool
+      of Oneof:
+        oneofName: string
+        oneof: seq[ProtoNode]
       of Enum:
         enumName: string
         values: seq[ProtoNode]
@@ -154,8 +157,18 @@ when isMainModule:
         nested: seq[ProtoNode]
       of File:
         syntax: string
+        package: string
         messages: seq[ProtoNode]
         imported: seq[ProtoNode]
+      of Imported:
+        filename: string
+
+  proc merge(base: var ProtoNode, extra: ProtoNode) =
+    assert(base.kind == File, "Merge only works on ProtoFile node kinds, but argument 'base' is a different kind")
+    assert(extra.kind == File, "Merge only works on ProtoFile node kinds, but argument 'extra' is a different kind")
+    assert(base.syntax == extra.syntax, "Both files must have the same syntax")
+    base.messages.insert extra.messages
+    base.imported.insert extra.imported
 
   proc `$`(node: ProtoNode): string =
     case node.kind:
@@ -166,6 +179,13 @@ when isMainModule:
           node.number)
         if node.repeated:
           result &= " is repeated"
+      of Oneof:
+        result = "One-of named $1, with one of these fields:\n".format(
+          node.oneofName)
+        var fields = ""
+        for field in node.oneof:
+          fields &= $field & "\n"
+        result &= fields[0..^2].indent(1, "  ")
       of Enum:
         result = "Enum $1 has values:\n".format(
           node.enumName)
@@ -224,15 +244,34 @@ when isMainModule:
           data &= messages[0..^2].indent(1, "  ")
         result &= data.indent(1, "  ")
       of File:
-        result = "Protobuf file with syntax $1 and messages:\n".format(
-          node.syntax)
-        var body = ""
+        result = "Protobuf file$2 with syntax $1\n".format(
+          node.syntax,
+          if node.package == nil: "" else: "(with package name: " & node.package & ")")
+        if node.imported.len != 0:
+          var body = "Imported:\n"
+          for imp in node.imported:
+            body &= ($imp).indent(1, "  ")
+            result &= body.indent(1, "  ") & "\n"
+            body = "\n"
+        var body = "Messages:\n"
         for message in node.messages:
-          body &= $message
+          body &= ($message).indent(1, "  ")
           result &= body.indent(1, "  ")
           body = "\n"
+      of Imported:
+        result = "Imported file " & node.filename
 
   proc syntaxline(): StringParser[string] = (token("syntax") + ws("=") + str() + endstatement()).map(
+    proc (stuple: auto): string =
+      stuple[0][1]
+  )
+
+  proc importstatement(): StringParser[ProtoNode] = (token("import") + str() + endstatement()).map(
+    proc (stuple: auto): ProtoNode =
+      ProtoNode(kind: Imported, filename: stuple[0][1])
+  )
+
+  proc package(): StringParser[string] = (token("package") + typespecifier() + endstatement()).map(
     proc (stuple: auto): string =
       stuple[0][1]
   )
@@ -277,8 +316,14 @@ when isMainModule:
       result = ProtoNode(kind: Enum, enumName: input[0][0][0][1], values: input[0][1])
   )
 
-  proc messageblock(): StringParser[ProtoNode] = (token("message") + class() + ws("{") + (declaration() / reserved() / enumblock() / token("message").flatMap(
+  proc oneof(): StringParser[ProtoNode] = (token("oneof") + token() + ws("{") + declaration().repeat(1) + ws("}")).map(
+    proc (input: auto): ProtoNode =
+      result = ProtoNode(kind: Oneof, oneofName: input[0][0][0][1], oneof: input[0][1])
+  )
+
+  proc messageblock(): StringParser[ProtoNode] = (token("message") + class() + ws("{") + (oneof() / declaration() / reserved() / enumblock() / token("message").flatMap(
     proc(msg: string): StringParser[ProtoNode] =
+      # Strange hack to get recursive parsers to work properly
       (proc (rest: string): Maybe[(ProtoNode, string), string] =
         messageblock()(msg & " " & rest)
       )
@@ -293,23 +338,29 @@ when isMainModule:
             result.definedEnums.add thing
           of Field:
             result.fields.add thing
+          of Oneof:
+            result.fields.add thing
           of Message:
             result.nested.add thing
           else:
             continue
     )
 
-  proc protofile(): StringParser[ProtoNode] = (syntaxline() + messageblock().repeat(1)).map(
+  proc protofile(): StringParser[ProtoNode] = (syntaxline() + optional(package()) + (messageblock() / importstatement()).repeat(1)).map(
     proc (input: auto): ProtoNode =
-      result = ProtoNode(kind: File, syntax: input[0], messages: @[])
+      result = ProtoNode(kind: File, syntax: input[0][0], messages: @[], imported: @[], package: input[0][1])
       for message in input[1]:
-        result.messages.add message
+        if message.kind == Message:
+          result.messages.add message
+        else:
+          result.imported.add message
   )
 
   #echo parse(ignorefirst(comment(), s("syntax")) , "syntax = \"This is syntax\";")
   echo parse(optional(ws("hello")) + ws("world"), "hello world")
   echo parse(optional(ws("hello")) + ws("world"), " world")
   echo parse(syntaxline(), "syntax = \"This is syntax\";")
+  echo parse(importstatement(), "import \"This is syntax\";")
   echo parse(declaration(), "int32 syntax = 5;")
   echo parse(typespecifier(), "This.Is.Atest")
   echo parse(declaration(), "This.Is.Atest name = 5;")
@@ -326,9 +377,25 @@ when isMainModule:
   }
   """")
 
+  macro protoTest(file: static[string]): untyped =
+    var
+      protoStr = readFile("proto3.prot")
+      protoParsed = parse(protofile(), protoStr)
+    result = newStmtList()
+
+  #protoTest("proto3.prot")
+
+
   var
     protoStr = readFile("proto3.prot")
     protoParsed = parse(protofile(), protoStr)
+
+  while protoParsed.imported.len != 0:
+    var toImport = protoParsed.imported[0]
+    protoParsed.imported = protoParsed.imported[1..^1]
+    protoParsed.merge(parse(protofile(), readFile(toImport.filename)))
+
+  echo protoParsed
 
   type ValidationError = object of Exception
 
@@ -375,7 +442,11 @@ when isMainModule:
     ValidationAssert(message.kind == Message, "ProtoBuf messages field contains something else than messages")
     let name = (if parent != "": parent & "." else: "") & message.messageName
     for field in message.fields:
-      ValidationAssert(field.protoType in validTypes or name & "." & field.protoType in validTypes, "Type does not exist in definition")
+      if field.kind == Field:
+        ValidationAssert(field.protoType in validTypes or name & "." & field.protoType in validTypes, "Type \"" & field.protoType & "\" does not exist in definition")
+      else:
+        for field in field.oneof:
+          ValidationAssert(field.protoType in validTypes or name & "." & field.protoType in validTypes, "Type \"" & field.protoType & "\" does not exist in definition")
     for innerMessage in message.nested:
       verifyTypes(innerMessage, validTypes, name)
 
@@ -385,20 +456,21 @@ when isMainModule:
       usedNames: seq[string] = @[]
       usedIndices: seq[int] = @[]
     for field in message.fields:
-      ValidationAssert(field.kind == Field, "Field for defined fields contained something else than a field")
-      ValidationAssert(field.name notin usedNames, "Field name already used")
-      ValidationAssert(field.number notin usedIndices, "Field number already used")
-      usedNames.add field.name
-      usedIndices.add field.number
-      for value in message.reserved:
-        ValidationAssert(value.kind == Reserved, "Field for reserved values contained something else than a reserved value")
-        case value.reservedKind:
-          of String:
-            ValidationAssert(value.strVal != field.name, "Field name in list of reserved names")
-          of Number:
-            ValidationAssert(value.intVal != field.number, "Field index in list of reserved indices")
-          of Range:
-            ValidationAssert(not(field.number >= value.startVal and field.number <= value.endVal), "Field index in list of reserved indices")
+      ValidationAssert(field.kind == Field or field.kind == Oneof, "Field for defined fields contained something else than a field")
+      for field in (if field.kind == Field: @[field] else: field.oneof):
+        ValidationAssert(field.name notin usedNames, "Field name already used")
+        ValidationAssert(field.number notin usedIndices, "Field number already used")
+        usedNames.add field.name
+        usedIndices.add field.number
+        for value in message.reserved:
+          ValidationAssert(value.kind == Reserved, "Field for reserved values contained something else than a reserved value")
+          case value.reservedKind:
+            of String:
+              ValidationAssert(value.strVal != field.name, "Field name in list of reserved names")
+            of Number:
+              ValidationAssert(value.intVal != field.number, "Field index in list of reserved indices")
+            of Range:
+              ValidationAssert(not(field.number >= value.startVal and field.number <= value.endVal), "Field index in list of reserved indices")
     for m in message.nested:
       discard verifyReservedAndUnique(m)
     return true
@@ -406,6 +478,7 @@ when isMainModule:
   proc valid(proto: ProtoNode): bool =
     ValidationAssert(proto.kind == File, "Validation must take an entire ProtoFile")
     ValidationAssert(proto.syntax == "proto3", "File must follow proto3 syntax")
+    ValidationAssert(proto.package == nil, "Package support not implemented yet")
     var validTypes = @["int32", "int64", "uint32", "uint64", "sint32", "sint64", "fixed32",
       "fixed64", "sfixed32", "sfixed64", "bool", "bytes", "enum", "float", "double", "string"]
     for message in proto.messages:
@@ -414,6 +487,7 @@ when isMainModule:
     for message in proto.messages:
       verifyTypes(message, validTypes)
     echo validTypes
+    return true
 
 
   if protoParsed.valid:
