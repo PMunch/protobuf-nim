@@ -51,18 +51,32 @@ when isMainModule:
   import "../combparser/combparser"
   import lists
 
-  proc charmatch(charsets: varargs[set[char]]): StringParser[string] =
-    (proc (input: string): Maybe[(string, string), string] =
-      var pos = 0
-      for c in input:
-        for s in charsets:
-          if c in s: pos += 1
-      if pos > 0:
-        Just[(string, string), string]((input[0 .. pos], input[(pos + 1) .. input.len]))
-      else:
-        Nothing[(string, string), string](`pos` & ": Couldn't match regex \"" & `regexStr` & "\"", input)
-    )
+  macro charmatch(charset: set[char]): untyped =
+    let pos = lineInfo(callsite())
+    result = quote do:
+      (proc (input: string): Maybe[(string, string), string] =
+        var pos = 0
+        for c in input:
+          if c in `charset`: pos += 1
+          else: break
+        if pos > 0:
+          Just[(string, string), string]((input[0 .. pos-1], input[pos .. input.len]))
+        else:
+          Nothing[(string, string), string](`pos` & ": Couldn't match characters \"" & (if `charset` == Whitespace: "Whitespace" else: $`charset`) & "\"", input)
+      )
 
+  macro allbut(but: string): untyped =
+    let pos = lineInfo(callsite())
+    result = quote do:
+      (proc (input: string): Maybe[(string, string), string] =
+        var pos = input.find(`but`)
+        if pos == -1:
+          pos = input.len
+        if pos > 0:
+          Just[(string, string), string]((input[0 .. pos-1], input[pos .. input.len]))
+        else:
+          Nothing[(string, string), string](`pos` & ": All-but \"" & `but` & "\" failed", input)
+      )
 
   proc ignorefirst[T](first: StringParser[string], catch: StringParser[T]): StringParser[T] =
     (first + catch).map(proc(input: tuple[f1: string, f2: T]): T = input.f2) / catch
@@ -70,12 +84,12 @@ when isMainModule:
   proc ignorelast[T](catch: StringParser[T], last: StringParser[string]): StringParser[T] =
     (catch + last).map(proc(input: tuple[f1: T, f2: string]): T = input.f1) / catch
 
+  proc ignoresides[T](first: StringParser[string], catch: StringParser[T], last: StringParser[string]): StringParser[T] =
+    ignorefirst(first, catch).ignorelast(last)
+
   proc andor(first, last: StringParser[string]): StringParser[string] =
     (first + last).map(proc(input: tuple[f1, f2: string]): string = input.f1 & input.f2) /
       (first / last)
-
-  proc ws(value: string): StringParser[string] =
-    regex(r"\s*" & value & r"\s*")
 
   proc combine(list: seq[string], sep: string): string =
     result = ""
@@ -86,17 +100,48 @@ when isMainModule:
   proc combine(list: seq[string]): string =
     list.combine("")
 
-  proc combine(t: tuple[f1, f2: string]): string = t.f1 & t.f2
+  proc combine(t: tuple[f1, f2: string]): string =
+    if t.f1 == nil:
+      t.f2
+    elif t.f2 == nil:
+      t.f1
+    else:
+      t.f1 & t.f2
 
-  proc combine[T](t: tuple[f1: T, f2: string]): string = t.f1.combine() & t.f2
+  proc combine[T](t: tuple[f1: T, f2: string]): string =
+    if t.f2 == nil:
+      t.f1.combine()
+    else:
+      t.f1.combine() & t.f2
 
-  proc combine[T](t: tuple[f1: string, f2: T]): string = t.f1 & t.f2.combine()
+  proc combine[T](t: tuple[f1: string, f2: T]): string =
+    if t.f1 == nil:
+      t.f2.combine()
+    else:
+      t.f1 & t.f2.combine()
 
   proc combine[T, U](t: tuple[f1: T, f2: U]): string = t.f1.combine() & t.f2.combine()
 
-  proc endcomment(): StringParser[string] = regex(r"\s*//.*\s*").repeat(1).map(combine)
+  proc combine[T, U](t: tuple[f1: T, f2: StringParser[U]]): string = t.f1.combine() & t.f2.map(combine)
 
-  proc inlinecomment(): StringParser[string] = regex(r"\s*/\*.*\*/\s*").repeat(1).map(combine)
+  proc combine[T, U](t: tuple[f1: StringParser[T], f2: StringParser[U]]): string = t.f1.map(combine) & t.f2.map(combine)
+
+  proc combine[T](list: seq[T]): string =
+    result = ""
+    for entry in list:
+      result = result & entry.combine()
+
+  proc optwhitespace[T](parser: StringParser[T]): StringParser[T] =
+    ignorefirst(charmatch(Whitespace), parser).ignorelast(charmatch(Whitespace))
+
+  proc ws(value: string): StringParser[string] =
+    optwhitespace(s(value))
+
+  proc endcomment(): StringParser[string] =
+    ignorefirst(charmatch(Whitespace), s("//") + allbut("\n") + s("\n")).repeat(1).map(combine)
+
+  proc inlinecomment(): StringParser[string] =
+    ignorefirst(charmatch(Whitespace), s("/*") + allbut("*/") + s("*/")).repeat(1).map(combine)
 
   proc comment(): StringParser[string] = andor(endcomment(), inlinecomment()).repeat(1).map(combine)
 
@@ -104,31 +149,48 @@ when isMainModule:
     ignorefirst(inlinecomment(), ws(";")).ignorelast(comment())
 
   proc str(): StringParser[string] =
-    ignorefirst(inlinecomment(), regex(r"\s*\""[^""]*\""\s*")).map(
-      proc(n: string): string =
-        n.strip()[1..^2]
+    ignorefirst(inlinecomment(), optwhitespace(s("\"") + allbut("\"") + s("\""))).map(
+      proc(n: auto): string =
+        n[0][1]
     ).ignorelast(comment())
 
-  proc number(): StringParser[string] = regex(r"\s*[0-9]+\s*").map(proc(n: string): string =
-    n.strip())
+  proc number(): StringParser[string] =
+    #n.strip())
+    optwhitespace(charmatch(Digits))
 
   proc strip(input: string): string =
     input.strip(true, true)
 
   proc enumname(): StringParser[string] =
-    ignorefirst(comment(), regex(r"\s*[A-Z]*\s*")).ignorelast(comment()).map(strip)
+    ignorefirst(comment(),
+      optwhitespace(charmatch({'A'..'Z'}))
+    ).ignorelast(comment())
 
   proc token(): StringParser[string] =
-    ignorefirst(comment(), regex(r"\s*[a-z][a-zA-Z0-9_]*\s*")).ignorelast(comment()).map(strip)
+    ignorefirst(comment(),
+      (
+        ignorefirst(charmatch(Whitespace), charmatch({'a'..'z'})) +
+        ignorelast(optional(charmatch({'a'..'z', 'A'..'Z', '0'..'9', '_'})), charmatch(Whitespace))
+      ).map(combine)
+    ).ignorelast(comment())
 
   proc token(name: string): StringParser[string] =
     ignorefirst(comment(), ws(name)).ignorelast(comment()).map(strip)
 
   proc class(): StringParser[string] =
-    ignorefirst(comment(), regex(r"\s*[A-Z][a-zA-Z0-9_]*\s*")).ignorelast(comment()).map(strip)
+    ignorefirst(comment(),
+      (
+        ignorefirst(charmatch(Whitespace), charmatch({'A'..'Z'})) +
+        ignorelast(optional(charmatch({'a'..'z', 'A'..'Z', '0'..'9', '_'})), charmatch(Whitespace))
+      ).map(combine)
+    ).ignorelast(comment())
 
   proc typespecifier(): StringParser[string] =
-    ignorefirst(comment(), regex(r"\s*[A-Za-z0-9_\.]*\s*")).ignorelast(comment()).map(strip)
+    ignorefirst(comment(),
+      (
+        optwhitespace(charmatch({'a'..'z', 'A'..'Z', '0'..'9', '_', '.'}))
+      )
+    ).ignorelast(comment())
 
   type
     ReservedType = enum
