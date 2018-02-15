@@ -51,6 +51,19 @@ when isMainModule:
   import "../combparser/combparser"
   import lists
 
+  proc charmatch(charsets: varargs[set[char]]): StringParser[string] =
+    (proc (input: string): Maybe[(string, string), string] =
+      var pos = 0
+      for c in input:
+        for s in charsets:
+          if c in s: pos += 1
+      if pos > 0:
+        Just[(string, string), string]((input[0 .. pos], input[(pos + 1) .. input.len]))
+      else:
+        Nothing[(string, string), string](`pos` & ": Couldn't match regex \"" & `regexStr` & "\"", input)
+    )
+
+
   proc ignorefirst[T](first: StringParser[string], catch: StringParser[T]): StringParser[T] =
     (first + catch).map(proc(input: tuple[f1: string, f2: T]): T = input.f2) / catch
 
