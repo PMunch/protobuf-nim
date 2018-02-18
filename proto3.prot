@@ -2,8 +2,8 @@
 syntax = "proto3";
 /* Welcome to this protobuf file*/
 // Package support not available yet
-//package test.package;
-//import "otherfile.prot";
+package test.package;
+import "otherfile.prot";
 
 message SearchRequest {
   reserved 5, 6, 7 to 10;
