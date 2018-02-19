@@ -13,5 +13,5 @@ message Third {
     FRENCH = 2;
     BOLIVIAN = 3;
   }
-  NatLangs test = 1;
+  .NatLangs test = 1;
 }

@@ -429,6 +429,7 @@ when isMainModule:
 
   proc protofile(): StringParser[ProtoNode] = (syntaxline() + optional(package()) + (messageblock() / importstatement() / enumblock()).repeat(1)).map(
     proc (input: auto): ProtoNode =
+      echo input
       result = ProtoNode(kind: File, syntax: input[0][0], imported: @[], package: ProtoNode(kind: Package, packageName: input[0][1], messages: @[], packageEnums: @[]))
       for message in input[1]:
         case message.kind:
@@ -504,29 +505,43 @@ when isMainModule:
         result.add name
       else: ValidationAssert(false, "Unknown kind: " & $message.kind)
 
-  proc verifyTypes(package: ProtoNode, validTypes: seq[string], parent: seq[string] = @[]) =
+  proc verifyTypes(node: ProtoNode, validTypes: seq[string], parent: seq[string] = @[]) =
     # TODO: Continue this imlpementation
-    # - Move case to top level and make it recurse
     # - Change depth scanning to change direction when field.protoType starts with "."
-    for package in package.packages:
-      var name = parent.concat(package.packageName.split(".")) & ""
-      for message in package.messages:
-        name[name.high] = message.messageName
-        for field in message.fields:
-          case field.kind:
-            of Field:
-              block fieldBlock:
-                if field.protoType notin ["int32", "int64", "uint32", "uint64", "sint32", "sint64", "fixed32",
-                  "fixed64", "sfixed32", "sfixed64", "bool", "bytes", "enum", "float", "double", "string"]:
-                  var depth = name.len
-                  while depth > 0:
-                    if name[0 .. <depth].join(".") & "." & field.protoType in validTypes:
-                      break fieldBlock
-                    depth -= 1
-                  ValidationAssert(false, "Type not recognized: " & name.join(".") & "." & field.protoType)
-            of Oneof:
-              discard
-            else: ValidationAssert(false, "Unknown kind: " & $message.kind)
+    case node.kind:
+      of Field:
+        block fieldBlock:
+          if node.protoType notin ["int32", "int64", "uint32", "uint64", "sint32", "sint64", "fixed32",
+            "fixed64", "sfixed32", "sfixed64", "bool", "bytes", "enum", "float", "double", "string"]:
+            if node.protoType[0] != '.':
+              var depth = parent.len
+              while depth > 0:
+                if parent[0 .. <depth].join(".") & "." & node.protoType in validTypes:
+                  echo parent[0 .. <depth].join(".") & "." & node.protoType
+                  break fieldBlock
+                depth -= 1
+            else:
+              if node.protoType[1 .. ^1] in validTypes:
+                echo node.protoType[1 .. ^1]
+                break fieldBlock
+              var depth = 0
+              while depth < parent.len:
+                echo "Checking: " & parent[depth .. ^1].join(".") & "." & node.protoType[1 .. ^1]
+                if parent[depth .. ^1].join(".") & "." & node.protoType[1 .. ^1] in validTypes:
+                  echo parent[depth .. ^1].join(".") & "." & node.protoType[1 .. ^1]
+                  break fieldBlock
+                depth += 1
+            ValidationAssert(false, "Type not recognized: " & parent.join(".") & "." & node.protoType)
+      of Oneof:
+        discard
+      of ProtoDef:
+        for node in node.packages:
+          var name = parent.concat(if node.packageName == nil: @[] else: node.packageName.split(".")) & ""
+          for message in node.messages:
+            name[name.high] = message.messageName
+            for field in message.fields:
+              verifyTypes(field, validTypes, name)
+      else: ValidationAssert(false, "Unknown kind: " & $node.kind)
 
   proc verifyReservedAndUnique(message: ProtoNode) =
     ValidationAssert(message.kind == Message, "ProtoBuf messages field contains something else than messages")
