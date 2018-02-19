@@ -505,7 +505,7 @@ when isMainModule:
         result.add name
       else: ValidationAssert(false, "Unknown kind: " & $message.kind)
 
-  proc verifyTypes(node: ProtoNode, validTypes: seq[string], parent: seq[string] = @[]) =
+  proc verifyAndExpandTypes(node: ProtoNode, validTypes: seq[string], parent: seq[string] = @[]) =
     case node.kind:
       of Field:
         block fieldBlock:
@@ -515,35 +515,34 @@ when isMainModule:
               var depth = parent.len
               while depth > 0:
                 if parent[0 .. <depth].join(".") & "." & node.protoType in validTypes:
-                  echo parent[0 .. <depth].join(".") & "." & node.protoType
+                  node.protoType = parent[0 .. <depth].join(".") & "." & node.protoType
                   break fieldBlock
                 depth -= 1
             else:
               if node.protoType[1 .. ^1] in validTypes:
-                echo node.protoType[1 .. ^1]
+                node.protoType = node.protoType[1 .. ^1]
                 break fieldBlock
               var depth = 0
               while depth < parent.len:
-                echo "Checking: " & parent[depth .. ^1].join(".") & "." & node.protoType[1 .. ^1]
                 if parent[depth .. ^1].join(".") & "." & node.protoType[1 .. ^1] in validTypes:
-                  echo parent[depth .. ^1].join(".") & "." & node.protoType[1 .. ^1]
+                  node.protoType = parent[depth .. ^1].join(".") & "." & node.protoType[1 .. ^1]
                   break fieldBlock
                 depth += 1
             ValidationAssert(false, "Type not recognized: " & parent.join(".") & "." & node.protoType)
       of Oneof:
         for field in node.oneof:
-          verifyTypes(field, validTypes, parent)
+          verifyAndExpandTypes(field, validTypes, parent)
       of Message:
         var name = parent & node.messageName
         for field in node.fields:
-          verifyTypes(field, validTypes, name)
+          verifyAndExpandTypes(field, validTypes, name)
         for subMessage in node.nested:
-          verifyTypes(subMessage, validTypes, name)
+          verifyAndExpandTypes(subMessage, validTypes, name)
       of ProtoDef:
         for node in node.packages:
           var name = parent.concat(if node.packageName == nil: @[] else: node.packageName.split("."))
           for message in node.messages:
-            verifyTypes(message, validTypes, name)
+            verifyAndExpandTypes(message, validTypes, name)
       else: ValidationAssert(false, "Unknown kind: " & $node.kind)
 
   proc verifyReservedAndUnique(message: ProtoNode) =
@@ -579,7 +578,7 @@ when isMainModule:
       verifyReservedAndUnique(message)
       validTypes = validTypes.concat message.getTypes()
     for message in proto.messages:
-      verifyTypes(message, validTypes)
+      verifyAndExpandTypes(message, validTypes)
     echo validTypes
 
   #macro protoTest(file: static[string]): untyped =
@@ -593,7 +592,8 @@ when isMainModule:
     echo protoParsed
     var validTypes = protoParsed.getTypes()
     echo validTypes
-    protoParsed.verifyTypes(validTypes)
+    protoParsed.verifyAndExpandTypes(validTypes)
+    echo protoParsed
 
     #if protoParsed.valid:
     #  echo "File is valid!"
