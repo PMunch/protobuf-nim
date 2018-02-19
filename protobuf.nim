@@ -506,8 +506,6 @@ when isMainModule:
       else: ValidationAssert(false, "Unknown kind: " & $message.kind)
 
   proc verifyTypes(node: ProtoNode, validTypes: seq[string], parent: seq[string] = @[]) =
-    # TODO: Continue this imlpementation
-    # - Change depth scanning to change direction when field.protoType starts with "."
     case node.kind:
       of Field:
         block fieldBlock:
@@ -533,14 +531,19 @@ when isMainModule:
                 depth += 1
             ValidationAssert(false, "Type not recognized: " & parent.join(".") & "." & node.protoType)
       of Oneof:
-        discard
+        for field in node.oneof:
+          verifyTypes(field, validTypes, parent)
+      of Message:
+        var name = parent & node.messageName
+        for field in node.fields:
+          verifyTypes(field, validTypes, name)
+        for subMessage in node.nested:
+          verifyTypes(subMessage, validTypes, name)
       of ProtoDef:
         for node in node.packages:
-          var name = parent.concat(if node.packageName == nil: @[] else: node.packageName.split(".")) & ""
+          var name = parent.concat(if node.packageName == nil: @[] else: node.packageName.split("."))
           for message in node.messages:
-            name[name.high] = message.messageName
-            for field in message.fields:
-              verifyTypes(field, validTypes, name)
+            verifyTypes(message, validTypes, name)
       else: ValidationAssert(false, "Unknown kind: " & $node.kind)
 
   proc verifyReservedAndUnique(message: ProtoNode) =
