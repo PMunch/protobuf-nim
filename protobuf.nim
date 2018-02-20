@@ -78,6 +78,13 @@ when isMainModule:
           Nothing[(string, string), string](`pos` & ": All-but \"" & `but` & "\" failed", input)
       )
 
+  proc onerror[T, U](parser: Parser[T, U], message: string, wrap = false): Parser[T, U] =
+    (proc (input: U): Maybe[(T, U), U] =
+      result = parser(input)
+      if not result.hasValue:
+        result.errors = Error[U](kind: Leaf, leafError: message, input: input)
+    )
+
   proc ignorefirst[T](first: StringParser[string], catch: StringParser[T]): StringParser[T] =
     (first + catch).map(proc(input: tuple[f1: string, f2: T]): T = input.f2) / catch
 
@@ -155,7 +162,7 @@ when isMainModule:
     ).ignorelast(comment())
 
   proc number(): StringParser[string] =
-    optwhitespace(charmatch(Digits))
+    optwhitespace(charmatch(Digits)).onerror("Number doesn't match!")
 
   proc strip(input: string): string =
     input.strip(true, true)
@@ -585,7 +592,9 @@ when isMainModule:
   block test:
     var
       protoStr = readFile("proto3.prot")
-      protoParsed = parse(protofile(), protoStr)
+      protoParseRes = protofile()(protoStr)
+      protoParsed = protoParseRes.value[0]
+    echo "Errors: \"" & protoParseRes.getError() & "\""
 
     protoParsed.expandToFullDef()
 
