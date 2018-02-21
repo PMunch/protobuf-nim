@@ -60,7 +60,7 @@ when isMainModule:
           if c in `charset`: pos += 1
           else: break
         if pos > 0:
-          Just[(string, string), string]((input[0 .. pos-1], input[pos .. input.len]))
+          Just[(string, string), string]((input[0 .. pos-1], input[pos .. input.high]))
         else:
           Nothing[(string, string), string](`pos` & ": Couldn't match characters \"" & (if `charset` == Whitespace: "Whitespace" else: $`charset`) & "\"", input)
       )
@@ -73,7 +73,7 @@ when isMainModule:
         if pos == -1:
           pos = input.len
         if pos > 0:
-          Just[(string, string), string]((input[0 .. pos-1], input[pos .. input.len]))
+          Just[(string, string), string]((input[0 .. pos-1], input[pos .. input.high]))
         else:
           Nothing[(string, string), string](`pos` & ": All-but \"" & `but` & "\" failed", input)
       )
@@ -397,7 +397,7 @@ when isMainModule:
   proc enumvals(): StringParser[ProtoNode] = (enumname() + ws("=") + number() + endstatement()).map(
     proc (input: auto): ProtoNode =
       result = ProtoNode(kind: EnumVal, fieldName: input[0][0][0], num: parseInt(input[0][1]))
-  )
+  ).onerror("Unable to parse enumval")
 
   proc enumblock(): StringParser[ProtoNode] = (token("enum") + class() + ws("{") + enumvals().repeat(1) + ws("}")).map(
     proc (input: auto): ProtoNode =
@@ -436,7 +436,7 @@ when isMainModule:
 
   proc protofile(): StringParser[ProtoNode] = (syntaxline() + optional(package()) + (messageblock() / importstatement() / enumblock()).repeat(1)).map(
     proc (input: auto): ProtoNode =
-      echo input
+      echo "This is a good mapping"
       result = ProtoNode(kind: File, syntax: input[0][0], imported: @[], package: ProtoNode(kind: Package, packageName: input[0][1], messages: @[], packageEnums: @[]))
       for message in input[1]:
         case message.kind:
@@ -462,6 +462,10 @@ when isMainModule:
   proc expandToFullDef(protoParsed: var ProtoNode) =
     expandToFullDef(protoParsed, readFile)
 
+  let parsed = (number()).onerror("Unable to match numbers")("12-3;")
+  echo parsed.value
+  echo parsed.errors == nil
+  echo parsed
   #echo parse(ignorefirst(comment(), s("syntax")) , "syntax = \"This is syntax\";")
   #echo parse(optional(ws("hello")) + ws("world"), "hello world")
   #echo parse(optional(ws("hello")) + ws("world"), " world")
@@ -475,7 +479,7 @@ when isMainModule:
   #echo parse(reserved(), "reserved 5, 7 to max;")
   #echo parse(reserved(), "reserved \"foo\";")
   #echo parse(reserved(), "reserved \"foo\", \"bar\";")
-  #echo parse(enumvals(), "TEST = 4;")
+  #echo parse(enumvals(), "TEST = 12a;")
   #echo parse(enumblock(), """enum Test {
   #  TEST = 5;
   #  FOO = 6;
@@ -590,6 +594,7 @@ when isMainModule:
 
   #macro protoTest(file: static[string]): untyped =
   block test:
+  #when false:
     var
       protoStr = readFile("proto3.prot")
       protoParseRes = protofile()(protoStr)
