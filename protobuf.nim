@@ -51,40 +51,6 @@ when isMainModule:
   import "../combparser/combparser"
   import lists
 
-  macro charmatch(charset: set[char]): untyped =
-    let pos = lineInfo(callsite())
-    result = quote do:
-      (proc (input: string): Maybe[(string, string), string] =
-        var pos = 0
-        for c in input:
-          if c in `charset`: pos += 1
-          else: break
-        if pos > 0:
-          Just[(string, string), string]((input[0 .. pos-1], input[pos .. input.len]))
-        else:
-          Nothing[(string, string), string](`pos` & ": Couldn't match characters \"" & (if `charset` == Whitespace: "Whitespace" else: $`charset`) & "\"", input)
-      )
-
-  macro allbut(but: string): untyped =
-    let pos = lineInfo(callsite())
-    result = quote do:
-      (proc (input: string): Maybe[(string, string), string] =
-        var pos = input.find(`but`)
-        if pos == -1:
-          pos = input.len
-        if pos > 0:
-          Just[(string, string), string]((input[0 .. pos-1], input[pos .. input.len]))
-        else:
-          Nothing[(string, string), string](`pos` & ": All-but \"" & `but` & "\" failed", input)
-      )
-
-  proc onerror[T, U](parser: Parser[T, U], message: string, wrap = false): Parser[T, U] =
-    (proc (input: U): Maybe[(T, U), U] =
-      result = parser(input)
-      if not result.hasValue:
-        result.errors = Error[U](kind: Leaf, leafError: message, input: input)
-    )
-
   proc ignorefirst[T](first: StringParser[string], catch: StringParser[T]): StringParser[T] =
     (first + catch).map(proc(input: tuple[f1: string, f2: T]): T = input.f2) / catch
 
