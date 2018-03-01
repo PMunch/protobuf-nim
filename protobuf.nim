@@ -486,7 +486,7 @@ when isMainModule:
     case node.kind:
       of Field:
         block fieldBlock:
-          node.name = parent.join(".") & "." & node.name
+          #node.name = parent.join(".") & "." & node.name
           if node.protoType notin ["int32", "int64", "uint32", "uint64", "sint32", "sint64", "fixed32",
             "fixed64", "sfixed32", "sfixed64", "bool", "bytes", "enum", "float", "double", "string"]:
             if node.protoType[0] != '.':
@@ -507,13 +507,13 @@ when isMainModule:
                   break fieldBlock
                 depth += 1
             ValidationAssert(false, "Type not recognized: " & parent.join(".") & "." & node.protoType)
-      of EnumVal:
-        node.fieldName = parent.join(".") & "." & node.fieldName
+      #of EnumVal:
+      #  node.fieldName = parent.join(".") & "." & node.fieldName
       of Enum:
-        var name = parent & node.enumName
-        for enumVal in node.values:
-          verifyAndExpandTypes(enumVal, validTypes, name)
-        node.enumName = parent.join(".") & "." & node.enumName
+        #var name = parent & node.enumName
+        #for enumVal in node.values:
+        #  verifyAndExpandTypes(enumVal, validTypes, name)
+        node.enumName = (if parent.len != 0: parent.join(".") & "." else: "") & node.enumName
       of Oneof:
         for field in node.oneof:
           verifyAndExpandTypes(field, validTypes, parent)
@@ -532,6 +532,9 @@ when isMainModule:
           var name = parent.concat(if node.packageName == nil: @[] else: node.packageName.split("."))
           for message in node.messages:
             verifyAndExpandTypes(message, validTypes, name)
+          for enu in node.packageEnums:
+            verifyAndExpandTypes(enu, validTypes, name)
+
       else: ValidationAssert(false, "Unknown kind: " & $node.kind)
 
   proc verifyReservedAndUnique(message: ProtoNode) =
@@ -570,8 +573,78 @@ when isMainModule:
       verifyAndExpandTypes(message, validTypes)
     echo validTypes
 
-  #macro protoTest(file: static[string]): untyped =
-  block test:
+  proc generateCode(proto: ProtoNode): NimNode {.compileTime.} =
+    proc generateEnums(node: ProtoNode, parent: var NimNode) =
+      case node.kind:
+      of EnumVal:
+        parent.add(
+          nnkEnumFieldDef.newTree(
+            newIdentNode(node.fieldName),
+            newIntLitNode(node.num)
+          )
+        )
+      of Enum:
+        var currentEnum = nnkTypeDef.newTree(
+          nnkPragmaExpr.newTree(
+            newIdentNode(node.enumName.replace(".", "_")),
+            nnkPragma.newTree(newIdentNode("pure"))
+          ),
+          newEmptyNode()
+        )
+        var enumBlock = nnkEnumTy.newTree(newEmptyNode())
+        for enumVal in node.values:
+          generateEnums(enumVal, enumBlock)
+        currentEnum.add(enumBlock)
+        parent.add(currentEnum)
+      of Message:
+        for definedEnum in node.definedEnums:
+          generateEnums(definedEnum, parent)
+        for subMessage in node.nested:
+          generateEnums(subMessage, parent)
+      of ProtoDef:
+        for node in node.packages:
+          for message in node.messages:
+            generateEnums(message, parent)
+          for enu in node.packageEnums:
+            generateEnums(enu, parent)
+      else: discard
+
+    proc generateMessageDef(node: ProtoNode, parent: var NimNode) =
+      case node.kind:
+      of Field:
+        parent.add(nnkIdentDefs.newTree(
+          newIdentNode(node.name),
+          newIdentNode(node.protoType.replace(".", "_")),
+          newEmptyNode()
+        ))
+      of Message:
+        var currentMessage = nnkTypeDef.newTree(
+          newIdentNode(node.messageName.replace(".", "_")),
+          newEmptyNode()
+        )
+        var messageBlock = nnkRecList.newNimNode()
+        for field in node.fields:
+          generateMessageDef(field, messageBlock)
+        currentMessage.add(nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), messageBlock))
+        parent.add(currentMessage)
+        for subMessage in node.nested:
+          generateMessageDef(subMessage, parent)
+      of ProtoDef:
+        for node in node.packages:
+          for message in node.messages:
+            generateMessageDef(message, parent)
+      else: discard
+
+    var
+      typeBlock = newNimNode(nnkTypeSection)
+
+    proto.generateEnums(typeBlock)
+    proto.generateMessageDef(typeBlock)
+    echo typeBlock.toStrLit
+    return typeBlock
+
+  macro protoTest(file: static[string]): untyped =
+  #block test:
   #when false:
     var
       protoStr = readFile("proto3.prot")
@@ -586,11 +659,12 @@ when isMainModule:
     echo validTypes
     protoParsed.verifyAndExpandTypes(validTypes)
     echo protoParsed
+    return generateCode(protoParsed)
 
     #if protoParsed.valid:
     #  echo "File is valid!"
 
-  #protoTest("proto3.prot")
+  protoTest("proto3.prot")
 
 when false:#isMainModule:
   var
