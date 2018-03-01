@@ -486,6 +486,7 @@ when isMainModule:
     case node.kind:
       of Field:
         block fieldBlock:
+          node.name = parent.join(".") & "." & node.name
           if node.protoType notin ["int32", "int64", "uint32", "uint64", "sint32", "sint64", "fixed32",
             "fixed64", "sfixed32", "sfixed64", "bool", "bytes", "enum", "float", "double", "string"]:
             if node.protoType[0] != '.':
@@ -506,15 +507,26 @@ when isMainModule:
                   break fieldBlock
                 depth += 1
             ValidationAssert(false, "Type not recognized: " & parent.join(".") & "." & node.protoType)
+      of EnumVal:
+        node.fieldName = parent.join(".") & "." & node.fieldName
+      of Enum:
+        var name = parent & node.enumName
+        for enumVal in node.values:
+          verifyAndExpandTypes(enumVal, validTypes, name)
+        node.enumName = parent.join(".") & "." & node.enumName
       of Oneof:
         for field in node.oneof:
           verifyAndExpandTypes(field, validTypes, parent)
+        node.oneofName = parent.join(".") & "." & node.oneofName
       of Message:
         var name = parent & node.messageName
         for field in node.fields:
           verifyAndExpandTypes(field, validTypes, name)
+        for definedEnum in node.definedEnums:
+          verifyAndExpandTypes(definedEnum, validTypes, name)
         for subMessage in node.nested:
           verifyAndExpandTypes(subMessage, validTypes, name)
+        node.messageName = name.join(".")
       of ProtoDef:
         for node in node.packages:
           var name = parent.concat(if node.packageName == nil: @[] else: node.packageName.split("."))
@@ -565,7 +577,7 @@ when isMainModule:
       protoStr = readFile("proto3.prot")
       protoParseRes = protofile()(protoStr)
       protoParsed = protoParseRes.value[0]
-    echo "Errors: \"" & protoParseRes.getError() & "\""
+    echo "Errors: \"" & protoParseRes.getShortError() & "\""
 
     protoParsed.expandToFullDef()
 
