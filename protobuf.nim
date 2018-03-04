@@ -574,8 +574,24 @@ when isMainModule:
     echo validTypes
 
   proc generateCode(proto: ProtoNode): NimNode {.compileTime.} =
-    proc generateEnums(node: ProtoNode, parent: var NimNode) =
+    proc generateTypes(node: ProtoNode, parent: var NimNode) =
       case node.kind:
+      of Field:
+        if node.repeated:
+          parent.add(nnkIdentDefs.newTree(
+            newIdentNode(node.name),
+            nnkBracketExpr.newTree(
+              newIdentNode(!"seq"),
+              newIdentNode(node.protoType.replace(".", "_"))
+            ),
+            newEmptyNode()
+          ))
+        else:
+          parent.add(nnkIdentDefs.newTree(
+            newIdentNode(node.name),
+            newIdentNode(node.protoType.replace(".", "_")),
+            newEmptyNode()
+          ))
       of EnumVal:
         parent.add(
           nnkEnumFieldDef.newTree(
@@ -593,30 +609,48 @@ when isMainModule:
         )
         var enumBlock = nnkEnumTy.newTree(newEmptyNode())
         for enumVal in node.values:
-          generateEnums(enumVal, enumBlock)
+          generateTypes(enumVal, enumBlock)
         currentEnum.add(enumBlock)
         parent.add(currentEnum)
-      of Message:
-        for definedEnum in node.definedEnums:
-          generateEnums(definedEnum, parent)
-        for subMessage in node.nested:
-          generateEnums(subMessage, parent)
-      of ProtoDef:
-        for node in node.packages:
-          for message in node.messages:
-            generateEnums(message, parent)
-          for enu in node.packageEnums:
-            generateEnums(enu, parent)
-      else: discard
-
-    proc generateMessageDef(node: ProtoNode, parent: var NimNode) =
-      case node.kind:
-      of Field:
-        parent.add(nnkIdentDefs.newTree(
-          newIdentNode(node.name),
-          newIdentNode(node.protoType.replace(".", "_")),
-          newEmptyNode()
-        ))
+      of OneOf:
+        var cases = nnkRecCase.newTree(
+            nnkIdentDefs.newTree(
+              newIdentNode(!"field"),
+              nnkBracketExpr.newTree(
+                newIdentNode(!"range"),
+                nnkInfix.newTree(
+                  newIdentNode(!".."),
+                  newLit(0),
+                  newLit(node.oneof.len - 1)
+                )
+              ),
+              newEmptyNode()
+            )
+          )
+        var curCase = 0
+        for field in node.oneof:
+          var caseBody = newNimNode(nnkRecList)
+          generateTypes(field, caseBody)
+          cases.add(
+            nnkOfBranch.newTree(
+              newLit(curCase),
+              caseBody
+            )
+          )
+          curCase += 1
+        parent.add(
+          nnkTypeDef.newTree(
+            newIdentNode(node.oneofName.replace(".", "_") & "_Type"),
+            newEmptyNode(),
+            nnkObjectTy.newTree(
+              newEmptyNode(),
+              newEmptyNode(),
+              nnkRecList.newTree(
+                cases
+              )
+            )
+          )
+        )
       of Message:
         var currentMessage = nnkTypeDef.newTree(
           newIdentNode(node.messageName.replace(".", "_")),
@@ -624,22 +658,35 @@ when isMainModule:
         )
         var messageBlock = nnkRecList.newNimNode()
         for field in node.fields:
-          generateMessageDef(field, messageBlock)
+          if field.kind == Field:
+            generateTypes(field, messageBlock)
+          else:
+            generateTypes(field, parent)
+            messageBlock.add(nnkIdentDefs.newTree(
+              newIdentNode(field.oneofName.replace(".", "_")),
+              newIdentNode(field.oneofName.replace(".", "_") & "_Type"),
+              newEmptyNode()
+            ))
         currentMessage.add(nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), messageBlock))
         parent.add(currentMessage)
+        for definedEnum in node.definedEnums:
+          generateTypes(definedEnum, parent)
         for subMessage in node.nested:
-          generateMessageDef(subMessage, parent)
+          generateTypes(subMessage, parent)
       of ProtoDef:
         for node in node.packages:
           for message in node.messages:
-            generateMessageDef(message, parent)
-      else: discard
+            generateTypes(message, parent)
+          for enu in node.packageEnums:
+            generateTypes(enu, parent)
+      else:
+        echo "Unsupported kind: " & $node.kind
+        discard
 
     var
       typeBlock = newNimNode(nnkTypeSection)
 
-    proto.generateEnums(typeBlock)
-    proto.generateMessageDef(typeBlock)
+    proto.generateTypes(typeBlock)
     echo typeBlock.toStrLit
     return typeBlock
 
