@@ -615,7 +615,7 @@ when isMainModule:
       of OneOf:
         var cases = nnkRecCase.newTree(
             nnkIdentDefs.newTree(
-              newIdentNode(!"field"),
+              newIdentNode(!"option"),
               nnkBracketExpr.newTree(
                 newIdentNode(!"range"),
                 nnkInfix.newTree(
