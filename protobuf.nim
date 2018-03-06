@@ -1,8 +1,14 @@
 import streams, strutils, sequtils, macros
 
 type
-  VarInt = distinct uint64
-  SVarInt = distinct int64
+  VarInt* = distinct uint64
+  SVarInt* = distinct int64
+  sint32* = distinct int32
+  sint64* = distinct int64
+  fixed64* = distinct int64
+  sfixed64* = distinct int64
+  fixed32* = distinct int32
+  sfixed32* = distinct int32
 
 when cpuEndian == littleEndian:
   proc hob(x: VarInt): int =
