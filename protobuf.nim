@@ -1,8 +1,6 @@
 import streams, strutils, sequtils, macros
 
 type
-  VarInt* = distinct uint64
-  SVarInt* = distinct int64
   sint32* = distinct int32
   sint64* = distinct int64
   fixed64* = distinct int64
@@ -11,7 +9,7 @@ type
   sfixed32* = distinct int32
 
 when cpuEndian == littleEndian:
-  proc hob(x: VarInt): int =
+  proc hob(x: int64 | sint64): int =
     result = x.int
     result = result or (result shr 1)
     result = result or (result shr 2)
@@ -21,37 +19,37 @@ when cpuEndian == littleEndian:
     result = result or (result shr 32)
     result = result - (result shr 1)
 
-  proc write(s: Stream, x: VarInt) =
+  proc protoWrite(s: Stream, x: int64) =
     var
       bytes = x.hob shr 7
-      num = x.int64
-    s.write((num and 0x7f or 0x80).uint8)
+      num = x
+    s.write((num and 0x7f or (if bytes > 0: 0x80 else: 0)).uint8)
     while bytes > 0:
       num = num shr 7
       bytes = bytes shr 7
       s.write((num and 0x7f or (if bytes > 0: 0x80 else: 0)).uint8)
 
-  proc readVarInt(s: Stream): VarInt =
+  proc protoReadInt64(s: Stream): int64 =
     var
-      byte = s.readInt8()
+      byte: int64 = s.readInt8()
       i = 1
-    result = (byte and 0x7f).VarInt
+    result = byte and 0x7f
     while (byte and 0x80) != 0:
       # TODO: Add error checking for values not fitting 64 bits
       byte = s.readInt8()
-      result = (result.uint64 or ((byte.uint64 and 0x7f) shl (7*i))).VarInt
+      result = result or ((byte and 0x7f) shl (7*i))
       i += 1
 
-  proc write(s: Stream, x: SVarInt) =
+  proc protoWrite(s: Stream, x: sint64) =
     # TODO: Ensure that this works for all int64 values
     var t = x.int64 * 2
     if x.int64 < 0:
       t = t xor -1
-    s.write(t.VarInt)
+    s.protoWrite(t.int64)
 
-  proc readSVarInt(s: Stream): SVarInt =
-    let y = s.readVarInt().uint64
-    return ((y shr 1) xor (if (y and 1) == 1: (-1).uint64 else: 0)).SVarInt
+  proc protoReadSint64(s: Stream): sint64 =
+    let y = s.protoReadInt64()
+    return ((y shr 1) xor (if (y and 1) == 1: -1 else: 0)).sint64
 
 when isMainModule:
   import "../combparser/combparser"
@@ -719,7 +717,42 @@ when isMainModule:
 
   protoTest("proto3.prot")
 
-when false:#isMainModule:
+when isMainModule:
+  import strutils
+
+  var
+    stream = newStringStream()
+  stream.protoWrite 0.int64
+  assert(stream.getPosition == 1, "Wrote more than 1 byte for the value 0")
+  stream.setPosition(0)
+  assert(stream.protoReadInt64() == 0, "Read a different value than 0 for the value 0")
+  stream.setPosition(0)
+  stream.protoWrite 128.int64
+  assert(stream.getPosition == 2, "Wrote more or less than 2 bytes for the value 128")
+  stream.setPosition(0)
+  assert(stream.protoReadInt64() == 128, "Read a different value than 128 for the value 128")
+  stream.setPosition(0)
+  stream.protoWrite -128.int64
+  assert(stream.getPosition == 10, "Wrote more or less than 10 bytes for the value -128")
+  stream.setPosition(0)
+  assert(stream.protoReadInt64() == -128, "Read a different value than -128 for the value -128")
+  stream.setPosition(0)
+  stream.protoWrite 0.sint64
+  assert(stream.getPosition == 1, "Wrote more or less than 1 bytes for the value 0")
+  stream.setPosition(0)
+  assert(stream.protoReadSint64().int64 == 0, "Read a different value than 0 for the value 0")
+  stream.setPosition(0)
+  stream.protoWrite 128.sint64
+  assert(stream.getPosition == 2, "Wrote more or less than 2 bytes for the value 128")
+  stream.setPosition(0)
+  assert(stream.protoReadSint64().int64 == 128, "Read a different value than 128 for the value 128")
+  stream.setPosition(0)
+  stream.protoWrite (-128).sint64
+  assert(stream.getPosition == 2, "Wrote more or less than 2 bytes for the value -128")
+  stream.setPosition(0)
+  assert(stream.protoReadSint64().int64 == -128, "Read a different value than -128 for the value -128")
+
+when false:
   var
     ss = newStringStream()
     num = (0x99_e1).VarInt
