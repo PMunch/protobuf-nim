@@ -3,10 +3,12 @@ import streams, strutils, sequtils, macros
 type
   sint32* = distinct int32
   sint64* = distinct int64
-  fixed64* = distinct int64
+  fixed64* = distinct uint64
   sfixed64* = distinct int64
-  fixed32* = distinct int32
+  fixed32* = distinct uint32
   sfixed32* = distinct int32
+  double* = distinct float64
+  bytes* = distinct seq[uint8]
 
 when cpuEndian == littleEndian:
   proc hob(x: int64 | sint64): int =
@@ -50,6 +52,59 @@ when cpuEndian == littleEndian:
   proc protoReadSint64(s: Stream): sint64 =
     let y = s.protoReadInt64()
     return ((y shr 1) xor (if (y and 1) == 1: -1 else: 0)).sint64
+
+  proc protoWrite(s: Stream, x: sint32) =
+    s.protoWrite(x.sint64)
+
+  proc protoReadSint32(s: Stream): sint32 =
+    s.protoReadSint64().sint32
+
+  proc protoWrite(s: Stream, x: fixed64) =
+    s.write(x.uint64)
+
+  proc protoReadFixed64(s: Stream): fixed64 =
+    s.readUint64().fixed64
+
+  proc protoWrite(s: Stream, x: fixed32) =
+    s.write(x.uint32)
+
+  proc protoReadFixed32(s: Stream): fixed32 =
+    s.readUInt32().fixed32
+
+  proc protoWrite(s: Stream, x: sfixed64) =
+    s.write(x.int64)
+
+  proc protoReadSfixed64(s: Stream): sfixed64 =
+    s.readInt64().sfixed64
+
+  proc protoWrite(s: Stream, x: sfixed32) =
+    s.write(x.int32)
+
+  proc protoReadSfixed32(s: Stream): sfixed32 =
+    s.readInt32().sfixed32
+
+  proc protoWrite(s: Stream, x: string) =
+    s.protoWrite(x.len.int64)
+    for c in x:
+      s.write(c)
+
+  proc protoReadString(s: Stream): string =
+    result = newString(s.protoReadInt64())
+    for i in 0..result.high:
+      result[i] = s.readChar()
+
+  proc protoWrite(s: Stream, x: float) =
+    s.write(x.float32)
+
+  proc protoReadFloat(s: Stream): float =
+    s.readFloat32()
+
+  proc protoWrite(s: Stream, x: double) =
+    s.write(x.float64)
+
+  proc protoReadDouble(s: Stream): double =
+    s.readFloat64().double
+
 
 when isMainModule:
   import "../combparser/combparser"
