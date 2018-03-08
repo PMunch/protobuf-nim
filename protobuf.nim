@@ -8,7 +8,25 @@ type
   fixed32* = distinct uint32
   sfixed32* = distinct int32
   double* = distinct float64
-  bytes* = distinct seq[uint8]
+  bytes* = seq[uint8]
+
+converter sint32ToInt32(x: sint32): int32 = x.int32
+converter sint64ToInt64(x: sint64): int64 = x.int64
+converter int32ToSint32(x: int32): sint32 = x.sint32
+converter int64ToSint64(x: int64): sint64 = x.sint64
+
+converter fixed32ToUint32(x: fixed32): uint32 = x.uint32
+converter fixed64ToUint64(x: fixed64): uint64 = x.uint64
+converter uint32ToFixed32(x: uint32): fixed32 = x.fixed32
+converter uint64ToFixed64(x: uint64): fixed64 = x.fixed64
+
+converter sfixed32ToInt32(x: sfixed32): int32 = x.int32
+converter sfixed64ToInt64(x: sfixed64): int64 = x.int64
+converter int32ToSfixed32(x: int32): sfixed32 = x.sfixed32
+converter int64ToSfixed64(x: int64): sfixed64 = x.sfixed64
+
+converter doubleToFloat(x: double): float = x.float
+converter floatToDouble(x: float64): double = x.double
 
 when cpuEndian == littleEndian:
   proc hob(x: int64 | sint64): int =
@@ -90,8 +108,18 @@ when cpuEndian == littleEndian:
 
   proc protoReadString(s: Stream): string =
     result = newString(s.protoReadInt64())
-    for i in 0..result.high:
+    for i in 0..<result.len:
       result[i] = s.readChar()
+
+  proc protoWrite(s: Stream, x: bytes) =
+    s.protoWrite(x.len.int64)
+    for c in x:
+      s.write(c)
+
+  proc protoReadBytes(s: Stream): bytes =
+    result = newSeq[uint8](s.protoReadInt64())
+    for i in 0..<result.len:
+      result[i] = s.readUint8()
 
   proc protoWrite(s: Stream, x: float) =
     s.write(x.float32)
@@ -551,8 +579,8 @@ when isMainModule:
             if node.protoType[0] != '.':
               var depth = parent.len
               while depth > 0:
-                if parent[0 .. <depth].join(".") & "." & node.protoType in validTypes:
-                  node.protoType = parent[0 .. <depth].join(".") & "." & node.protoType
+                if parent[0 ..< depth].join(".") & "." & node.protoType in validTypes:
+                  node.protoType = parent[0 ..< depth].join(".") & "." & node.protoType
                   break fieldBlock
                 depth -= 1
             else:
@@ -640,7 +668,7 @@ when isMainModule:
           parent.add(nnkIdentDefs.newTree(
             newIdentNode(node.name),
             nnkBracketExpr.newTree(
-              newIdentNode(!"seq"),
+              newIdentNode("seq"),
               newIdentNode(node.protoType.replace(".", "_"))
             ),
             newEmptyNode()
@@ -674,11 +702,11 @@ when isMainModule:
       of OneOf:
         var cases = nnkRecCase.newTree(
             nnkIdentDefs.newTree(
-              newIdentNode(!"option"),
+              newIdentNode("option"),
               nnkBracketExpr.newTree(
-                newIdentNode(!"range"),
+                newIdentNode("range"),
                 nnkInfix.newTree(
-                  newIdentNode(!".."),
+                  newIdentNode(".."),
                   newLit(0),
                   newLit(node.oneof.len - 1)
                 )
