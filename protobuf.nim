@@ -1,5 +1,22 @@
-import streams, strutils, sequtils, macros
+import streams, strutils, sequtils, macros, tables
 
+static:
+  let typeMapping = {
+    "int32": (kind: parseExpr("int32"), write: parseExpr("protoWriteint32"), read: parseExpr("protoReadint32")),
+    "int64": (kind: parseExpr("int64"), write: parseExpr("protoWriteint64"), read: parseExpr("protoReadint64")),
+    "sint32": (kind: parseExpr("int32"), write: parseExpr("protoWritesint32"), read: parseExpr("protoReadsint32")),
+    "sint64": (kind: parseExpr("int64"), write: parseExpr("protoWritesint64"), read: parseExpr("protoReadsint64")),
+    "fixed32": (kind: parseExpr("uint32"), write: parseExpr("protoWritefixed32"), read: parseExpr("protoReadfixed32")),
+    "fixed64": (kind: parseExpr("uint64"), write: parseExpr("protoWritefixed64"), read: parseExpr("protoReadfixed64")),
+    "sfixed32": (kind: parseExpr("int32"), write: parseExpr("protoWritesfixed32"), read: parseExpr("protoReadsfixed32")),
+    "sfixed64": (kind: parseExpr("int64"), write: parseExpr("protoWritesfixed64"), read: parseExpr("protoReadsfixed64")),
+    "float": (kind: parseExpr("float32"), write: parseExpr("protoWritefloat"), read: parseExpr("protoReadfloat")),
+    "double": (kind: parseExpr("float64"), write: parseExpr("protoWritedouble"), read: parseExpr("protoReaddouble")),
+    "string": (kind: parseExpr("string"), write: parseExpr("protoWritestring"), read: parseExpr("protoReadstring")),
+    "bytes": (kind: parseExpr("seq[uint8]"), write: parseExpr("protoWritebytes", read: parseExpr("protoReadbytes"))
+  }.toTable
+
+#[
 type
   sint32* = distinct int32
   sint64* = distinct int64
@@ -27,9 +44,10 @@ converter int64ToSfixed64(x: int64): sfixed64 = x.sfixed64
 
 converter doubleToFloat(x: double): float = x.float
 converter floatToDouble(x: float64): double = x.double
+]#
 
 when cpuEndian == littleEndian:
-  proc hob(x: int64 | sint64): int =
+  proc hob(x: int64): int =
     result = x.int
     result = result or (result shr 1)
     result = result or (result shr 2)
@@ -39,7 +57,7 @@ when cpuEndian == littleEndian:
     result = result or (result shr 32)
     result = result - (result shr 1)
 
-  proc protoWrite(s: Stream, x: int64) =
+  proc protoWriteInt64(s: Stream, x: int64) =
     var
       bytes = x.hob shr 7
       num = x
@@ -60,22 +78,22 @@ when cpuEndian == littleEndian:
       result = result or ((byte and 0x7f) shl (7*i))
       i += 1
 
-  proc protoWrite(s: Stream, x: sint64) =
+  proc protoWriteSint64(s: Stream, x: int64) =
     # TODO: Ensure that this works for all int64 values
-    var t = x.int64 * 2
-    if x.int64 < 0:
+    var t = x * 2
+    if x < 0:
       t = t xor -1
-    s.protoWrite(t.int64)
+    s.protoWriteInt64(t)
 
-  proc protoReadSint64(s: Stream): sint64 =
+  proc protoReadSint64(s: Stream): int64 =
     let y = s.protoReadInt64()
-    return ((y shr 1) xor (if (y and 1) == 1: -1 else: 0)).sint64
+    return ((y shr 1) xor (if (y and 1) == 1: -1 else: 0))
 
-  proc protoWrite(s: Stream, x: sint32) =
-    s.protoWrite(x.sint64)
+  proc protoWriteSint32(s: Stream, x: int32) =
+    s.protoWriteSint64(x.int64)
 
-  proc protoReadSint32(s: Stream): sint32 =
-    s.protoReadSint64().sint32
+  proc protoReadSint32(s: Stream): int32 =
+    s.protoReadSint64().int32
 
   proc protoWrite(s: Stream, x: fixed64) =
     s.write(x.uint64)
