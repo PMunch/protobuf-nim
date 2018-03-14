@@ -95,32 +95,32 @@ when cpuEndian == littleEndian:
   proc protoReadSint32(s: Stream): int32 =
     s.protoReadSint64().int32
 
-  proc protoWrite(s: Stream, x: fixed64) =
-    s.write(x.uint64)
+  proc protoWriteFixed64(s: Stream, x: uint64) =
+    s.write(x)
 
-  proc protoReadFixed64(s: Stream): fixed64 =
-    s.readUint64().fixed64
+  proc protoReadFixed64(s: Stream): uint64 =
+    s.readUint64()
 
-  proc protoWrite(s: Stream, x: fixed32) =
-    s.write(x.uint32)
+  proc protoWriteFixed32(s: Stream, x: uint32) =
+    s.write(x)
 
-  proc protoReadFixed32(s: Stream): fixed32 =
-    s.readUInt32().fixed32
+  proc protoReadFixed32(s: Stream): uint32 =
+    s.readUInt32()
 
-  proc protoWrite(s: Stream, x: sfixed64) =
-    s.write(x.int64)
+  proc protoWriteSfixed64(s: Stream, x: int64) =
+    s.write(x)
 
-  proc protoReadSfixed64(s: Stream): sfixed64 =
-    s.readInt64().sfixed64
+  proc protoReadSfixed64(s: Stream): int64 =
+    s.readInt64()
 
-  proc protoWrite(s: Stream, x: sfixed32) =
-    s.write(x.int32)
+  proc protoWriteSfixed64(s: Stream, x: int32) =
+    s.write(x)
 
-  proc protoReadSfixed32(s: Stream): sfixed32 =
-    s.readInt32().sfixed32
+  proc protoReadSfixed32(s: Stream): int32 =
+    s.readInt32()
 
-  proc protoWrite(s: Stream, x: string) =
-    s.protoWrite(x.len.int64)
+  proc protoWriteString(s: Stream, x: string) =
+    s.protoWriteInt64(x.len)
     for c in x:
       s.write(c)
 
@@ -129,27 +129,27 @@ when cpuEndian == littleEndian:
     for i in 0..<result.len:
       result[i] = s.readChar()
 
-  proc protoWrite(s: Stream, x: bytes) =
-    s.protoWrite(x.len.int64)
+  proc protoWriteBytes(s: Stream, x: seq[uint8]) =
+    s.protoWriteInt64(x.len)
     for c in x:
       s.write(c)
 
-  proc protoReadBytes(s: Stream): bytes =
+  proc protoReadBytes(s: Stream): seq[uint8] =
     result = newSeq[uint8](s.protoReadInt64())
     for i in 0..<result.len:
       result[i] = s.readUint8()
 
-  proc protoWrite(s: Stream, x: float) =
-    s.write(x.float32)
+  proc protoWriteFloat(s: Stream, x: float32) =
+    s.write(x)
 
-  proc protoReadFloat(s: Stream): float =
+  proc protoReadFloat(s: Stream): float32 =
     s.readFloat32()
 
-  proc protoWrite(s: Stream, x: double) =
-    s.write(x.float64)
+  proc protoWriteDouble(s: Stream, x: float64) =
+    s.write(x)
 
-  proc protoReadDouble(s: Stream): double =
-    s.readFloat64().double
+  proc protoReadDouble(s: Stream): float64 =
+    s.readFloat64()
 
 
 when isMainModule:
