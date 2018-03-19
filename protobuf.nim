@@ -13,7 +13,7 @@ static:
     "float": (kind: parseExpr("float32"), write: parseExpr("protoWritefloat"), read: parseExpr("protoReadfloat")),
     "double": (kind: parseExpr("float64"), write: parseExpr("protoWritedouble"), read: parseExpr("protoReaddouble")),
     "string": (kind: parseExpr("string"), write: parseExpr("protoWritestring"), read: parseExpr("protoReadstring")),
-    "bytes": (kind: parseExpr("seq[uint8]"), write: parseExpr("protoWritebytes", read: parseExpr("protoReadbytes"))
+    "bytes": (kind: parseExpr("seq[uint8]"), write: parseExpr("protoWritebytes"), read: parseExpr("protoReadbytes"))
   }.toTable
 
 #[
@@ -787,11 +787,64 @@ when isMainModule:
       else:
         echo "Unsupported kind: " & $node.kind
         discard
+    proc generateProcs(node: ProtoNode, parent: var NimNode, defs: var NimNode) =
+      case node.kind:
+        of Message:
+          let
+            readName = newIdentNode("read" & node.messageName.replace(".", "_"))
+            messageType = newIdentNode(node.messageName.replace(".", "_"))
+          let procs = quote do:
+            proc `readName`(s: Stream): `messageType`
+            proc write(s: Stream, o: `messageType`)
+          defs.add(procs)
+          var procDefs = quote do:
+            proc `readName`(s: Stream): `messageType`
+            proc write(s: Stream, o: `messageType`)
+          # Add a body to our procedures where we can put our statements
+          procDefs[0][6] = newStmtList()
+          procDefs[1][6] = newStmtList()
+          for field in node.fields:
+            if field.kind == Field:
+              procDefs[0][6].add(
+                nnkAsgn.newTree(
+                  nnkDotExpr.newTree(
+                    newIdentNode("result"),
+                    newIdentNode(field.name)
+                  ),
+                  nnkCall.newTree(
+                    if typeMapping.hasKey(field.protoType): typeMapping[field.protoType].read else: newIdentNode("read" & field.protoType.replace(".", "_")),
+                    procDefs[0][3][1][0]
+                  )
+                )
+              )
+              procDefs[1][6].add(
+                nnkCall.newTree(
+                  if typeMapping.hasKey(field.protoType): typeMapping[field.protoType].write else: newIdentNode("write"),
+                  procDefs[1][3][1][0],
+                  nnkDotExpr.newTree(
+                    procDefs[1][3][2][0], # The type argument from the declaration
+                    newIdentNode(field.name)
+                  )
+                )
+              )
+          echo procs.toStrLit
+          echo procDefs.toStrLit
+        of ProtoDef:
+          for node in node.packages:
+            for message in node.messages:
+              generateProcs(message, parent, defs)
+        else:
+          echo "Unsupported kind: " & $node.kind
+          discard
 
     var
       typeBlock = newNimNode(nnkTypeSection)
 
     proto.generateTypes(typeBlock)
+    var
+      forwardDeclaratinons = newStmtList()
+      implementations = newStmtList()
+    proto.generateProcs(implementations, forwardDeclaratinons)
     echo typeBlock.toStrLit
     return typeBlock
 
@@ -818,7 +871,7 @@ when isMainModule:
 
   protoTest("proto3.prot")
 
-when isMainModule:
+when false:
   import strutils
 
   var
