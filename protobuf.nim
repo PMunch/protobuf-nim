@@ -2,18 +2,18 @@ import streams, strutils, sequtils, macros, tables
 
 static:
   let typeMapping = {
-    "int32": (kind: parseExpr("int32"), write: parseExpr("protoWriteint32"), read: parseExpr("protoReadint32")),
-    "int64": (kind: parseExpr("int64"), write: parseExpr("protoWriteint64"), read: parseExpr("protoReadint64")),
-    "sint32": (kind: parseExpr("int32"), write: parseExpr("protoWritesint32"), read: parseExpr("protoReadsint32")),
-    "sint64": (kind: parseExpr("int64"), write: parseExpr("protoWritesint64"), read: parseExpr("protoReadsint64")),
-    "fixed32": (kind: parseExpr("uint32"), write: parseExpr("protoWritefixed32"), read: parseExpr("protoReadfixed32")),
-    "fixed64": (kind: parseExpr("uint64"), write: parseExpr("protoWritefixed64"), read: parseExpr("protoReadfixed64")),
-    "sfixed32": (kind: parseExpr("int32"), write: parseExpr("protoWritesfixed32"), read: parseExpr("protoReadsfixed32")),
-    "sfixed64": (kind: parseExpr("int64"), write: parseExpr("protoWritesfixed64"), read: parseExpr("protoReadsfixed64")),
-    "float": (kind: parseExpr("float32"), write: parseExpr("protoWritefloat"), read: parseExpr("protoReadfloat")),
-    "double": (kind: parseExpr("float64"), write: parseExpr("protoWritedouble"), read: parseExpr("protoReaddouble")),
-    "string": (kind: parseExpr("string"), write: parseExpr("protoWritestring"), read: parseExpr("protoReadstring")),
-    "bytes": (kind: parseExpr("seq[uint8]"), write: parseExpr("protoWritebytes"), read: parseExpr("protoReadbytes"))
+    "int32": (kind: parseExpr("int32"), write: parseExpr("protoWriteint32"), read: parseExpr("protoReadint32"), wire: 0),
+    "int64": (kind: parseExpr("int64"), write: parseExpr("protoWriteint64"), read: parseExpr("protoReadint64"), wire: 0),
+    "sint32": (kind: parseExpr("int32"), write: parseExpr("protoWritesint32"), read: parseExpr("protoReadsint32"), wire: 0),
+    "sint64": (kind: parseExpr("int64"), write: parseExpr("protoWritesint64"), read: parseExpr("protoReadsint64"), wire: 0),
+    "fixed32": (kind: parseExpr("uint32"), write: parseExpr("protoWritefixed32"), read: parseExpr("protoReadfixed32"), wire: 5),
+    "fixed64": (kind: parseExpr("uint64"), write: parseExpr("protoWritefixed64"), read: parseExpr("protoReadfixed64"), wire: 1),
+    "sfixed32": (kind: parseExpr("int32"), write: parseExpr("protoWritesfixed32"), read: parseExpr("protoReadsfixed32"), wire: 5),
+    "sfixed64": (kind: parseExpr("int64"), write: parseExpr("protoWritesfixed64"), read: parseExpr("protoReadsfixed64"), wire: 1),
+    "float": (kind: parseExpr("float32"), write: parseExpr("protoWritefloat"), read: parseExpr("protoReadfloat"), wire: 5),
+    "double": (kind: parseExpr("float64"), write: parseExpr("protoWritedouble"), read: parseExpr("protoReaddouble"), wire: 1),
+    "string": (kind: parseExpr("string"), write: parseExpr("protoWritestring"), read: parseExpr("protoReadstring"), wire: 2),
+    "bytes": (kind: parseExpr("seq[uint8]"), write: parseExpr("protoWritebytes"), read: parseExpr("protoReadbytes"), wire: 2)
   }.toTable
 
 #[
@@ -817,6 +817,22 @@ when isMainModule:
                   )
                 )
               )
+              procDefs[1][6].add(
+                nnkCall.newTree(
+                  newIdentNode("protoWriteInt64"),
+                  procDefs[1][3][1][0],
+                  newLit(field.number shl 3 or (if not field.repeated and typeMapping.hasKey(field.protoType): typeMapping[field.protoType].wire else: 2))
+                )
+              )
+              if field.repeated or (typeMapping.hasKey(field.protoType) and typeMapping[field.protoType].wire == 2) or not typeMapping.hasKey(field.protoType)):
+                procDefs[1][6].add(
+                  nnkCall.newTree(
+                    newIdentNode("protoWriteInt64"),
+                    procDefs[1][3][1][0],
+                    # TODO: Write the proper number here. For repeated fields, the sequences len. For other fields their corresponding length.
+                    newLit(if field.repeated: else: and typeMapping.hasKey(field.protoType): typeMapping[field.protoType].wire else: 2)
+                  )
+                )
               procDefs[1][6].add(
                 nnkCall.newTree(
                   if typeMapping.hasKey(field.protoType): typeMapping[field.protoType].write else: newIdentNode("write"),
