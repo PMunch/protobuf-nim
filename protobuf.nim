@@ -57,6 +57,13 @@ when cpuEndian == littleEndian:
     result = result or (result shr 32)
     result = result - (result shr 1)
 
+  proc getVarIntLen(num: int): int =
+    result = 1
+    var bits = num.uint64
+    while bits > 0b0111_1111.uint64:
+      result += 1
+      bits = bits shr 7
+
   proc protoWriteInt64(s: Stream, x: int64) =
     var
       bytes = x.hob shr 7
@@ -796,13 +803,16 @@ when isMainModule:
           let procs = quote do:
             proc `readName`(s: Stream): `messageType`
             proc write(s: Stream, o: `messageType`)
+            proc len(o: `messageType`): int
           defs.add(procs)
           var procDefs = quote do:
             proc `readName`(s: Stream): `messageType`
             proc write(s: Stream, o: `messageType`)
+            proc len(o: `messageType`): int
           # Add a body to our procedures where we can put our statements
           procDefs[0][6] = newStmtList()
           procDefs[1][6] = newStmtList()
+          procDefs[2][6] = newStmtList()
           for field in node.fields:
             if field.kind == Field:
               procDefs[0][6].add(
@@ -817,6 +827,7 @@ when isMainModule:
                   )
                 )
               )
+              # Write field number and wire type
               procDefs[1][6].add(
                 nnkCall.newTree(
                   newIdentNode("protoWriteInt64"),
@@ -824,25 +835,111 @@ when isMainModule:
                   newLit(field.number shl 3 or (if not field.repeated and typeMapping.hasKey(field.protoType): typeMapping[field.protoType].wire else: 2))
                 )
               )
-              if field.repeated or (typeMapping.hasKey(field.protoType) and typeMapping[field.protoType].wire == 2) or not typeMapping.hasKey(field.protoType)):
+              # Add entry in the len proc for this field
+              if typeMapping.hasKey(field.protoType):
+                case typeMapping[field.protoType].wire:
+                of 1:
+                  procDefs[2][6].add(nnkInfix.newTree(
+                    newIdentNode("+="),
+                    newIdentNode("result"),
+                    newLit(8)
+                  ))
+                of 5:
+                  procDefs[2][6].add(nnkInfix.newTree(
+                    newIdentNode("+="),
+                    newIdentNode("result"),
+                    newLit(4)
+                  ))
+                of 0:
+                  let
+                    theField = nnkDotExpr.newTree(procDefs[2][3][1][0], newIdentNode(field.name))
+                    iVar = nskVar.genSym()
+                    varInt = if field.repeated: nnkBracketExpr.newTree(theField, iVar) else: theField
+                    innerBody = nnkInfix.newTree(
+                      newIdentNode("+="),
+                      newIdentNode("result"),
+                      nnkCall.newTree(newIdentNode("getVarIntLen"),
+                        varInt
+                      )
+                    )
+                    outerBody = if field.repeated: (quote do:
+                      for `iVar` in 0..`theField`.high:
+                        `innerBody`
+                    ) else: innerBody
+                  procDefs[2][6].add(outerBody)
+                else:
+                  echo "Unable to create code"
+                  #raise newException(AssertionError, "Unable to generate code, wire type '" & $typeMapping[field.protoType].wire & "' not supported")
+              else:
+                procDefs[2][6].add(nnkInfix.newTree(
+                  newIdentNode("+="),
+                  newIdentNode("result"),
+                  nnkCall.newTree(newIdentNode("len"), nnkDotExpr.newTree(procDefs[2][3][1][0], newIdentNode(field.name)))
+                ))
+              # If the field is repeated or has a repeated wire type, write it's length
+              if field.repeated:
+                let
+                  streamSymbol = procDefs[1][3][1][0]
+                  fieldCont = nnkDotExpr.newTree(procDefs[1][3][2][0], newIdentNode(field.name))
+                if typeMapping.hasKey(field.protoType):
+                  case typeMapping[field.protoType].wire:
+                  of 1:
+                    # Write 64bit * len
+                    procDefs[1][6].add(quote do:
+                      `streamSymbol`.protoWriteInt64(8*`fieldCont`.len)
+                    )
+                  of 5:
+                    # Write 32bit * len
+                    procDefs[1][6].add(quote do:
+                      `streamSymbol`.protoWriteInt64(4*`fieldCont`.len)
+                    )
+                  of 0:
+                    # Sum varint lengths and write them
+                    procDefs[1][6].add(quote do:
+                      var bytes = 0
+                      for i in 0..`fieldCont`.high:
+                        bytes += getVarIntLen(`fieldCont`[i])
+                      `streamSymbol`.protoWriteInt64(bytes)
+                    )
+                  else:
+                    echo "Unable to create code"
+                else:
+                  # Loop through all entries and add the lengths together and write them
+                  procDefs[1][6].add(quote do:
+                    var bytes = 0
+                    for i in 0..`fieldCont`.high:
+                      bytes += `fieldCont`[i].len
+                    `streamSymbol`.protoWriteInt64(bytes)
+                  )
+              elif typeMapping.hasKey(field.protoType) and typeMapping[field.protoType].wire == 2:
                 procDefs[1][6].add(
                   nnkCall.newTree(
                     newIdentNode("protoWriteInt64"),
                     procDefs[1][3][1][0],
                     # TODO: Write the proper number here. For repeated fields, the sequences len. For other fields their corresponding length.
-                    newLit(if field.repeated: else: and typeMapping.hasKey(field.protoType): typeMapping[field.protoType].wire else: 2)
+                    nnkDotExpr.newTree(nnkDotExpr.newTree(procDefs[1][3][2][0], newIdentNode(field.name)), newIdentNode("len"))
+                    #(if field.repeated:
+                    #else:
+                    #  newLit(0 and typeMapping.hasKey(field.protoType): typeMapping[field.protoType].wire else: 2))
                   )
                 )
-              procDefs[1][6].add(
-                nnkCall.newTree(
+              # Write the actual field
+              let
+                theField = nnkDotExpr.newTree(procDefs[1][3][2][0], newIdentNode(field.name))
+                iVar = nskVar.genSym()
+                varInt = if field.repeated: nnkBracketExpr.newTree(theField, iVar) else: theField
+                innerBody = nnkCall.newTree(
                   if typeMapping.hasKey(field.protoType): typeMapping[field.protoType].write else: newIdentNode("write"),
                   procDefs[1][3][1][0],
-                  nnkDotExpr.newTree(
-                    procDefs[1][3][2][0], # The type argument from the declaration
-                    newIdentNode(field.name)
-                  )
+                  varInt
                 )
-              )
+                outerBody = if field.repeated: (quote do:
+                  for `iVar` in 0..`theField`.high:
+                    `innerBody`
+                ) else: innerBody
+              procDefs[1][6].add(outerBody)
+            else:
+              echo "Something else: " & $field.kind
           echo procs.toStrLit
           echo procDefs.toStrLit
         of ProtoDef:
@@ -886,6 +983,14 @@ when isMainModule:
     #  echo "File is valid!"
 
   protoTest("proto3.prot")
+  var t = -1234327
+  echo getVarIntLen(t)
+  var srepr = t.toBin(32)
+  srepr.insert(" ", 4)
+  srepr.insert(" ", 7+5)
+  srepr.insert(" ", 7+8+5)
+  srepr.insert(" ", 7+8+8+5)
+  echo srepr
 
 when false:
   import strutils
