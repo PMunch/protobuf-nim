@@ -40,3 +40,13 @@ message SearchRequest {
 message Second {
   SearchRequest.SubMessage.Langs test = 1;
 }
+
+message Test1 {
+  int32 a = 1;
+}
+
+message Result {
+  string url = 1;
+  string title = 2;
+  repeated string snippets = 3;
+}

@@ -16,36 +16,6 @@ static:
     "bytes": (kind: parseExpr("seq[uint8]"), write: parseExpr("protoWritebytes"), read: parseExpr("protoReadbytes"), wire: 2)
   }.toTable
 
-#[
-type
-  sint32* = distinct int32
-  sint64* = distinct int64
-  fixed64* = distinct uint64
-  sfixed64* = distinct int64
-  fixed32* = distinct uint32
-  sfixed32* = distinct int32
-  double* = distinct float64
-  bytes* = seq[uint8]
-
-converter sint32ToInt32(x: sint32): int32 = x.int32
-converter sint64ToInt64(x: sint64): int64 = x.int64
-converter int32ToSint32(x: int32): sint32 = x.sint32
-converter int64ToSint64(x: int64): sint64 = x.sint64
-
-converter fixed32ToUint32(x: fixed32): uint32 = x.uint32
-converter fixed64ToUint64(x: fixed64): uint64 = x.uint64
-converter uint32ToFixed32(x: uint32): fixed32 = x.fixed32
-converter uint64ToFixed64(x: uint64): fixed64 = x.fixed64
-
-converter sfixed32ToInt32(x: sfixed32): int32 = x.int32
-converter sfixed64ToInt64(x: sfixed64): int64 = x.int64
-converter int32ToSfixed32(x: int32): sfixed32 = x.sfixed32
-converter int64ToSfixed64(x: int64): sfixed64 = x.sfixed64
-
-converter doubleToFloat(x: double): float = x.float
-converter floatToDouble(x: float64): double = x.double
-]#
-
 when cpuEndian == littleEndian:
   proc hob(x: int64): int =
     result = x.int
@@ -57,14 +27,14 @@ when cpuEndian == littleEndian:
     result = result or (result shr 32)
     result = result - (result shr 1)
 
-  proc getVarIntLen(num: int): int =
+  proc getVarIntLen*(num: int | int64 | int32): int =
     result = 1
     var bits = num.uint64
     while bits > 0b0111_1111.uint64:
       result += 1
       bits = bits shr 7
 
-  proc protoWriteInt64(s: Stream, x: int64) =
+  proc protoWriteInt64*(s: Stream, x: int64) =
     var
       bytes = x.hob shr 7
       num = x
@@ -74,7 +44,7 @@ when cpuEndian == littleEndian:
       bytes = bytes shr 7
       s.write((num and 0x7f or (if bytes > 0: 0x80 else: 0)).uint8)
 
-  proc protoReadInt64(s: Stream): int64 =
+  proc protoReadInt64*(s: Stream): int64 =
     var
       byte: int64 = s.readInt8()
       i = 1
@@ -85,79 +55,84 @@ when cpuEndian == littleEndian:
       result = result or ((byte and 0x7f) shl (7*i))
       i += 1
 
-  proc protoWriteSint64(s: Stream, x: int64) =
+  proc protoReadInt32*(s: Stream): int32 =
+    s.protoReadInt64().int32
+
+  proc protoWriteInt32*(s: Stream, x: int32) =
+    s.protoWriteInt64(x.int64)
+
+  proc protoWriteSint64*(s: Stream, x: int64) =
     # TODO: Ensure that this works for all int64 values
     var t = x * 2
     if x < 0:
       t = t xor -1
     s.protoWriteInt64(t)
 
-  proc protoReadSint64(s: Stream): int64 =
+  proc protoReadSint64*(s: Stream): int64 =
     let y = s.protoReadInt64()
     return ((y shr 1) xor (if (y and 1) == 1: -1 else: 0))
 
-  proc protoWriteSint32(s: Stream, x: int32) =
+  proc protoWriteSint32*(s: Stream, x: int32) =
     s.protoWriteSint64(x.int64)
 
-  proc protoReadSint32(s: Stream): int32 =
+  proc protoReadSint32*(s: Stream): int32 =
     s.protoReadSint64().int32
 
-  proc protoWriteFixed64(s: Stream, x: uint64) =
+  proc protoWriteFixed64*(s: Stream, x: uint64) =
     s.write(x)
 
-  proc protoReadFixed64(s: Stream): uint64 =
+  proc protoReadFixed64*(s: Stream): uint64 =
     s.readUint64()
 
-  proc protoWriteFixed32(s: Stream, x: uint32) =
+  proc protoWriteFixed32*(s: Stream, x: uint32) =
     s.write(x)
 
-  proc protoReadFixed32(s: Stream): uint32 =
+  proc protoReadFixed32*(s: Stream): uint32 =
     s.readUInt32()
 
-  proc protoWriteSfixed64(s: Stream, x: int64) =
+  proc protoWriteSfixed64*(s: Stream, x: int64) =
     s.write(x)
 
-  proc protoReadSfixed64(s: Stream): int64 =
+  proc protoReadSfixed64*(s: Stream): int64 =
     s.readInt64()
 
-  proc protoWriteSfixed64(s: Stream, x: int32) =
+  proc protoWriteSfixed64*(s: Stream, x: int32) =
     s.write(x)
 
-  proc protoReadSfixed32(s: Stream): int32 =
+  proc protoReadSfixed32*(s: Stream): int32 =
     s.readInt32()
 
-  proc protoWriteString(s: Stream, x: string) =
+  proc protoWriteString*(s: Stream, x: string) =
     s.protoWriteInt64(x.len)
     for c in x:
       s.write(c)
 
-  proc protoReadString(s: Stream): string =
+  proc protoReadString*(s: Stream): string =
     result = newString(s.protoReadInt64())
     for i in 0..<result.len:
       result[i] = s.readChar()
 
-  proc protoWriteBytes(s: Stream, x: seq[uint8]) =
+  proc protoWriteBytes*(s: Stream, x: seq[uint8]) =
     s.protoWriteInt64(x.len)
     for c in x:
       s.write(c)
 
-  proc protoReadBytes(s: Stream): seq[uint8] =
+  proc protoReadBytes*(s: Stream): seq[uint8] =
     result = newSeq[uint8](s.protoReadInt64())
     for i in 0..<result.len:
       result[i] = s.readUint8()
 
-  proc protoWriteFloat(s: Stream, x: float32) =
+  proc protoWriteFloat*(s: Stream, x: float32) =
     s.write(x)
 
-  proc protoReadFloat(s: Stream): float32 =
+  proc protoReadFloat*(s: Stream): float32 =
     s.readFloat32()
 
-  proc protoWriteDouble(s: Stream, x: float64) =
+  proc protoWriteDouble*(s: Stream, x: float64) =
     s.write(x)
 
-  proc protoReadDouble(s: Stream): float64 =
+  proc protoReadDouble*(s: Stream): float64 =
     s.readFloat64()
-
 
 when isMainModule:
   import "../combparser/combparser"
@@ -514,7 +489,6 @@ when isMainModule:
 
   proc protofile(): StringParser[ProtoNode] = (syntaxline() + optional(package()) + (messageblock() / importstatement() / enumblock()).repeat(1)).map(
     proc (input: auto): ProtoNode =
-      echo "This is a good mapping"
       result = ProtoNode(kind: File, syntax: input[0][0], imported: @[], package: ProtoNode(kind: Package, packageName: input[0][1], messages: @[], packageEnums: @[]))
       for message in input[1]:
         case message.kind:
@@ -676,7 +650,7 @@ when isMainModule:
   proc valid(proto: ProtoNode) =
     ValidationAssert(proto.kind == File, "Validation must take an entire ProtoFile")
     ValidationAssert(proto.syntax == "proto3", "File must follow proto3 syntax")
-    ValidationAssert(proto.package == nil, "Package support not implemented yet")
+    #ValidationAssert(proto.package == nil, "Package support not implemented yet")
     var validTypes: seq[string]
     for message in proto.messages:
       verifyReservedAndUnique(message)
@@ -797,29 +771,30 @@ when isMainModule:
     proc generateFieldLen(node: ProtoNode, field: NimNode): NimNode =
       result = newStmtList()
       let fieldDesc = newLit(getVarIntLen(node.number shl 3 or (if not node.repeated and typeMapping.hasKey(node.protoType): typeMapping[node.protoType].wire else: 2)))
+      let res = newIdentNode("result")
       result.add(quote do:
-        result += `fieldDesc`
+        `res` += `fieldDesc`
       )
       if typeMapping.hasKey(node.protoType):
         case typeMapping[node.protoType].wire:
         of 1:
           result.add(quote do:
-            result += 8
+            `res` += 8
           )
         of 5:
           result.add(quote do:
-            result += 4
+            `res` += 4
           )
         of 2:
           result.add(quote do:
-            result += `field`.len
+            `res` += `field`.len
           )
         of 0:
           let
-            iVar = nskVar.genSym()
+            iVar = nskForVar.genSym()
             varInt = if node.repeated: nnkBracketExpr.newTree(field, iVar) else: field
             innerBody = quote do:
-              result += getVarIntLen(`varInt`)
+              `res` += getVarIntLen(`varInt`)
             outerBody = if node.repeated: (quote do:
               for `iVar` in 0..`field`.high:
                 `innerBody`
@@ -830,7 +805,7 @@ when isMainModule:
           #raise newException(AssertionError, "Unable to generate code, wire type '" & $typeMapping[field.protoType].wire & "' not supported")
       else:
         result.add(quote do:
-          result += `field`.len
+          `res` += `field`.len
         )
     proc generateFieldRead(node: ProtoNode, stream, field: NimNode): NimNode =
       result = newStmtList()
@@ -843,8 +818,17 @@ when isMainModule:
           `field` = @[]
           let endPos = `stream`.getPosition() + `sizeSym`
           while `stream`.getPosition() < endPos:
-            `field`.add(`protoRead`)
+            `field`.add(`stream`.`protoRead`())
         )
+      else:
+        let protoRead = if typeMapping.hasKey(node.protoType):
+          typeMapping[node.protoType].read
+        else:
+          newIdentNode("read" & node.protoType.replace(".", "_"))
+        result.add(quote do:
+          `field` = `stream`.`protoRead`()
+        )
+
     proc generateFieldWrite(node: ProtoNode, stream, field: NimNode): NimNode =
       # Write field number and wire type
       result = newStmtList()
@@ -872,7 +856,10 @@ when isMainModule:
           of 2:
             # Write len
             result.add(quote do:
-              `stream`.protoWriteInt64(`field`.len)
+              var bytes = 0
+              for i in 0..`field`.high:
+                bytes += `field`[i].len
+              `stream`.protoWriteInt64(bytes)
             )
           of 0:
             # Sum varint lengths and write them
@@ -892,17 +879,17 @@ when isMainModule:
               bytes += `field`[i].len
             `stream`.protoWriteInt64(bytes)
           )
-      elif typeMapping.hasKey(node.protoType) and typeMapping[node.protoType].wire == 2:
-        result.add(
-          nnkCall.newTree(
-            newIdentNode("protoWriteInt64"),
-            stream,
-            nnkDotExpr.newTree(field, newIdentNode("len"))
-          )
-        )
+      #elif typeMapping.hasKey(node.protoType) and typeMapping[node.protoType].wire == 2:
+      #  result.add(
+      #    nnkCall.newTree(
+      #      newIdentNode("protoWriteInt64"),
+      #      stream,
+      #      nnkDotExpr.newTree(field, newIdentNode("len"))
+      #    )
+      #  )
       # Write the actual field
       let
-        iVar = nskVar.genSym()
+        iVar = nskForVar.genSym()
         varInt = if node.repeated: nnkBracketExpr.newTree(field, iVar) else: field
         innerBody = nnkCall.newTree(
           if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].write else: newIdentNode("write"),
@@ -914,86 +901,99 @@ when isMainModule:
             `innerBody`
         ) else: innerBody
       result.add(outerBody)
-    proc generateProcs(node: ProtoNode, procs: var NimNode, defs: var NimNode) =
+    proc generateProcs(node: ProtoNode, decls: var NimNode, impls: var NimNode) =
       case node.kind:
         of Message:
           let
             readName = newIdentNode("read" & node.messageName.replace(".", "_"))
             messageType = newIdentNode(node.messageName.replace(".", "_"))
-          var procs = quote do:
-            proc `readName`(s: Stream): `messageType`
+          var procDecls = quote do:
+            proc `readName`(s: Stream, maxSize: int = 0): `messageType`
             proc write(s: Stream, o: `messageType`)
             proc len(o: `messageType`): int
-          defs.add(procs)
-          var procDefs = quote do:
-            proc `readName`(s: Stream): `messageType` =
-              while not s.atEnd:
+          var procImpls = quote do:
+            proc `readName`(s: Stream, maxSize: int = 0): `messageType` =
+              let startPos = s.getPosition()
+              while not s.atEnd or (maxSize != 0 and s.getPosition() < startPos + maxSize):
                 let
                   fieldSpec = s.protoReadInt64().uint64
                   wireType = fieldSpec and 0b111
                   fieldNumber = fieldSpec shr 3
-                case fieldNumber:
+                case fieldNumber.int64:
             proc write(s: Stream, o: `messageType`)
             proc len(o: `messageType`): int
           # Add a body to our procedures where we can put our statements
-          procDefs[1][6] = newStmtList()
-          procDefs[2][6] = newStmtList()
+          procImpls[1][6] = newStmtList()
+          procImpls[2][6] = newStmtList()
           for field in node.fields:
-            generateProcs(field, procs, procDefs)
+            generateProcs(field, procDecls, procImpls)
           # TODO: Add generic reader for unknown types based on wire type
-          procDefs[0][6][0][1][1].add(nnkElse.newTree(nnkStmtList.newTree(nnkDiscardStmt.newTree(newEmptyNode()))))
-          echo procDefs[0][6][0][1][1].treeRepr
-          echo procs.toStrLit
-          echo procDefs.toStrLit
+          procImpls[0][6][1][1][1].add(nnkElse.newTree(nnkStmtList.newTree(nnkDiscardStmt.newTree(newEmptyNode()))))
+          for enumType in node.definedEnums:
+            generateProcs(enumType, procDecls, procImpls)
+          for message in node.nested:
+            generateProcs(message, decls, impls)
+          decls.add procDecls
+          impls.add procImpls
         of OneOf:
+          let oneofName = newIdentNode(node.oneofname.replace(".", "_"))
+          for oneof in node.oneof:
+            impls[0][6][1][1][1].add(nnkOfBranch.newTree(newLit(oneof.number),
+              generateFieldRead(oneof, impls[1][3][1][0], nnkDotExpr.newTree(nnkDotExpr.newTree(newIdentNode("result"), oneofName), newIdentNode(oneof.name)))
+            ))
           var
-            oneofBlock = nnkCaseStmt.newTree(
-                nnkDotExpr.newTree(nnkDotExpr.newTree(defs[1][3][2][0], newIdentNode(node.oneofname.replace(".", "_"))), newIdentNode("option"))
+            oneofWriteBlock = nnkCaseStmt.newTree(
+                nnkDotExpr.newTree(nnkDotExpr.newTree(impls[1][3][2][0], oneofName), newIdentNode("option"))
+              )
+            oneofLenBlock = nnkCaseStmt.newTree(
+                nnkDotExpr.newTree(nnkDotExpr.newTree(impls[2][3][1][0], oneofName), newIdentNode("option"))
               )
           for i in 0..node.oneof.high:
-            oneofBlock.add(nnkOfBranch.newTree(
+            oneofWriteBlock.add(nnkOfBranch.newTree(
                 newLit(i),
-                generateFieldWrite(node.oneof[i], defs[1][3][1][0],
-                  nnkDotExpr.newTree(nnkDotExpr.newTree(defs[1][3][2][0], newIdentNode(node.oneofname.replace(".", "_"))), newIdentNode(node.oneof[i].name))
+                generateFieldWrite(node.oneof[i], impls[1][3][1][0],
+                  nnkDotExpr.newTree(nnkDotExpr.newTree(impls[1][3][2][0], oneofName), newIdentNode(node.oneof[i].name))
                 )
               )
             )
-          defs[1][6].add oneofBlock
-          oneofBlock = nnkCaseStmt.newTree(
-              nnkDotExpr.newTree(nnkDotExpr.newTree(defs[2][3][1][0], newIdentNode(node.oneofname.replace(".", "_"))), newIdentNode("option"))
-            )
+          impls[1][6].add oneofWriteBlock
           for i in 0..node.oneof.high:
-            oneofBlock.add(nnkOfBranch.newTree(
+            oneofLenBlock.add(nnkOfBranch.newTree(
                 newLit(i),
                 generateFieldLen(node.oneof[i],
-                  nnkDotExpr.newTree(nnkDotExpr.newTree(defs[2][3][1][0], newIdentNode(node.oneofname.replace(".", "_"))), newIdentNode(node.oneof[i].name))
+                  nnkDotExpr.newTree(nnkDotExpr.newTree(impls[2][3][1][0], oneofName), newIdentNode(node.oneof[i].name))
                 )
               )
             )
-          defs[2][6].add oneofBlock
+          impls[2][6].add oneofLenBlock
         of Field:
-          defs[0][6][0][1][1].add(nnkOfBranch.newTree(newLit(node.number),
-            nnkStmtList.newTree(
-              nnkAsgn.newTree(
-                nnkDotExpr.newTree(
-                  newIdentNode("result"),
-                  newIdentNode(node.name)
-                ),
-                nnkCall.newTree(
-                  if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].read else: newIdentNode("read" & node.protoType.replace(".", "_")),
-                  defs[0][3][1][0]
-                )
-              )
-            )
+          impls[0][6][1][1][1].add(nnkOfBranch.newTree(newLit(node.number),
+            generateFieldRead(node, impls[0][3][1][0], nnkDotExpr.newTree(newIdentNode("result"), newIdentNode(node.name)))
           ))
-          # Add entry in the len proc for this field
-          defs[2][6].add(generateFieldLen(node, nnkDotExpr.newTree(defs[2][3][1][0], newIdentNode(node.name))))
-          let writeStmt = generateFieldWrite(node, defs[1][3][1][0], nnkDotExpr.newTree(defs[1][3][2][0], newIdentNode(node.name)))
-          defs[1][6].add(writeStmt)
+          impls[1][6].add(generateFieldWrite(node, impls[1][3][1][0], nnkDotExpr.newTree(impls[1][3][2][0], newIdentNode(node.name))))
+          impls[2][6].add(generateFieldLen(node, nnkDotExpr.newTree(impls[2][3][1][0], newIdentNode(node.name))))
+        of Enum:
+          let
+            readName = newIdentNode("read" & node.enumName.replace(".", "_"))
+            enumType = newIdentNode(node.enumName.replace(".", "_"))
+          decls.add quote do:
+            proc `readName`(s: Stream): `enumType`
+            proc write(s: Stream, o: `enumType`)
+            proc len(o: `enumType`): int
+          impls.add quote do:
+            proc `readName`(s: Stream): `enumType` =
+              s.protoReadInt64().`enumType`
+            proc write(s: Stream, o: `enumType`) =
+              s.write(o.int64)
+            proc len(o: `enumType`): int =
+              getVarIntLen(o.int64)
+          # Add a body to our procedures where we can put our statements
         of ProtoDef:
           for node in node.packages:
             for message in node.messages:
-              generateProcs(message, procs, defs)
+              generateProcs(message, decls, impls)
+            for packageEnum in node.packageEnums:
+              generateProcs(packageEnum, decls, impls)
         else:
           echo "Unsupported kind: " & $node.kind
           discard
@@ -1003,11 +1003,13 @@ when isMainModule:
 
     proto.generateTypes(typeBlock)
     var
-      forwardDeclaratinons = newStmtList()
+      forwardDeclarations = newStmtList()
       implementations = newStmtList()
-    proto.generateProcs(implementations, forwardDeclaratinons)
-    echo typeBlock.toStrLit
-    return typeBlock
+    proto.generateProcs(forwardDeclarations, implementations)
+    return quote do:
+      `typeBlock`
+      `forwardDeclarations`
+      `implementations`
 
   macro protoTest(file: static[string]): untyped =
   #block test:
@@ -1016,15 +1018,17 @@ when isMainModule:
       protoStr = readFile("proto3.prot")
       protoParseRes = protofile()(protoStr)
       protoParsed = protoParseRes.value[0]
-    echo "Errors: \"" & protoParseRes.getShortError() & "\""
+    let shortErr = protoParseRes.getShortError()
+    if shortErr.len != 0:
+      echo "Errors: \"" & shortErr & "\""
 
     protoParsed.expandToFullDef()
 
-    echo protoParsed
+    #echo protoParsed
     var validTypes = protoParsed.getTypes()
-    echo validTypes
+    #echo validTypes
     protoParsed.verifyAndExpandTypes(validTypes)
-    echo protoParsed
+    #echo protoParsed
     return generateCode(protoParsed)
 
     #if protoParsed.valid:
@@ -1039,6 +1043,37 @@ when isMainModule:
   srepr.insert(" ", 7+8+5)
   srepr.insert(" ", 7+8+8+5)
   echo srepr
+
+  var
+    stream = newStringStream()
+  var test: test_package_Test1
+  test.a = 150
+  stream.write(test)
+  echo stream.getPosition()
+  stream.setPosition(0)
+  while not stream.atEnd:
+    stdout.write stream.readUint8().toHex() & " "
+  echo ""
+  stream.setPosition(0)
+  var test2 = stream.read_test_package_Test1()
+  echo test2.a
+
+  var
+    stream2 = newStringStream()
+  var test3: test_package_Result
+  test3.url = "peterme.net"
+  test3.title = "Welcome to my DevLog"
+  test3.snippets = @["This is a test", "So is this", "Even this is a test"]
+  stream2.write test3
+  stream2.setPosition(0)
+  while not stream2.atEnd:
+    stdout.write stream2.readUint8().toHex() & " "
+  echo ""
+  stream2.setPosition(0)
+  var test4 = stream2.read_test_package_Result()
+  echo test4.url
+  echo test4.title
+  echo test4.snippets
 
 when false:
   import strutils
