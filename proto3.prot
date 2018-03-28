@@ -51,7 +51,18 @@ message Result {
   repeated string snippets = 3;
 }
 
+enum Corpus {
+  UNIVERSAL = 0;
+  WEB = 1;
+  IMAGES = 2;
+  LOCAL = 3;
+  NEWS = 4;
+  PRODUCTS = 5;
+  VIDEO = 6;
+}
+
 message Double {
   repeated Test1 a = 1;
   Result b = 2;
+  Corpus c = 3;
 }

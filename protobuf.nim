@@ -1,20 +1,5 @@
 import streams, strutils, sequtils, macros, tables
 
-static:
-  let typeMapping = {
-    "int32": (kind: parseExpr("int32"), write: parseExpr("protoWriteint32"), read: parseExpr("protoReadint32"), wire: 0),
-    "int64": (kind: parseExpr("int64"), write: parseExpr("protoWriteint64"), read: parseExpr("protoReadint64"), wire: 0),
-    "sint32": (kind: parseExpr("int32"), write: parseExpr("protoWritesint32"), read: parseExpr("protoReadsint32"), wire: 0),
-    "sint64": (kind: parseExpr("int64"), write: parseExpr("protoWritesint64"), read: parseExpr("protoReadsint64"), wire: 0),
-    "fixed32": (kind: parseExpr("uint32"), write: parseExpr("protoWritefixed32"), read: parseExpr("protoReadfixed32"), wire: 5),
-    "fixed64": (kind: parseExpr("uint64"), write: parseExpr("protoWritefixed64"), read: parseExpr("protoReadfixed64"), wire: 1),
-    "sfixed32": (kind: parseExpr("int32"), write: parseExpr("protoWritesfixed32"), read: parseExpr("protoReadsfixed32"), wire: 5),
-    "sfixed64": (kind: parseExpr("int64"), write: parseExpr("protoWritesfixed64"), read: parseExpr("protoReadsfixed64"), wire: 1),
-    "float": (kind: parseExpr("float32"), write: parseExpr("protoWritefloat"), read: parseExpr("protoReadfloat"), wire: 5),
-    "double": (kind: parseExpr("float64"), write: parseExpr("protoWritedouble"), read: parseExpr("protoReaddouble"), wire: 1),
-    "string": (kind: parseExpr("string"), write: parseExpr("protoWritestring"), read: parseExpr("protoReadstring"), wire: 2),
-    "bytes": (kind: parseExpr("seq[uint8]"), write: parseExpr("protoWritebytes"), read: parseExpr("protoReadbytes"), wire: 2)
-  }.toTable
 
 when cpuEndian == littleEndian:
   proc hob(x: int64): int =
@@ -555,7 +540,7 @@ when isMainModule:
         let name = (if parent != "": parent & "." else: "") & (if message.packageName == nil: "" else: message.packageName)
         for definedEnum in message.packageEnums:
           ValidationAssert(definedEnum.kind == Enum, "Field for defined enums contained something else than a message")
-          result.add name & definedEnum.enumName
+          result.add name & "." & definedEnum.enumName
         for innerMessage in message.messages:
           result = result.concat innerMessage.getTypes(name)
       of Message:
@@ -577,6 +562,7 @@ when isMainModule:
             "fixed64", "sfixed32", "sfixed64", "bool", "bytes", "enum", "float", "double", "string"]:
             if node.protoType[0] != '.':
               var depth = parent.len
+              echo validTypes
               while depth > 0:
                 if parent[0 ..< depth].join(".") & "." & node.protoType in validTypes:
                   node.protoType = parent[0 ..< depth].join(".") & "." & node.protoType
@@ -616,10 +602,10 @@ when isMainModule:
       of ProtoDef:
         for node in node.packages:
           var name = parent.concat(if node.packageName == nil: @[] else: node.packageName.split("."))
-          for message in node.messages:
-            verifyAndExpandTypes(message, validTypes, name)
           for enu in node.packageEnums:
             verifyAndExpandTypes(enu, validTypes, name)
+          for message in node.messages:
+            verifyAndExpandTypes(message, validTypes, name)
 
       else: ValidationAssert(false, "Unknown kind: " & $node.kind)
 
@@ -647,6 +633,24 @@ when isMainModule:
     for m in message.nested:
       verifyReservedAndUnique(m)
 
+  proc registerEnums(typeMapping: var Table[string, tuple[kind, write, read: NimNode, wire: int]], node: ProtoNode) =
+    case node.kind:
+    of Enum:
+      typeMapping[node.enumName] = (kind: newIdentNode(node.enumName.replace(".", "_")), write: newIdentNode("write"), read: newIdentNode("read" & node.enumName.replace(".", "_")), wire: 0)
+    of Message:
+      for message in node.nested:
+        registerEnums(typeMapping, message)
+      for enu in node.definedEnums:
+        registerEnums(typeMapping, enu)
+    of ProtoDef:
+      for node in node.packages:
+        for message in node.messages:
+          registerEnums(typeMapping, message)
+        for enu in node.packageEnums:
+          registerEnums(typeMapping, enu)
+    else:
+      discard
+
   proc valid(proto: ProtoNode) =
     ValidationAssert(proto.kind == File, "Validation must take an entire ProtoFile")
     ValidationAssert(proto.syntax == "proto3", "File must follow proto3 syntax")
@@ -659,7 +663,7 @@ when isMainModule:
       verifyAndExpandTypes(message, validTypes)
     echo validTypes
 
-  proc generateCode(proto: ProtoNode): NimNode {.compileTime.} =
+  proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], proto: ProtoNode): NimNode {.compileTime.} =
     proc generateTypes(node: ProtoNode, parent: var NimNode) =
       case node.kind:
       of Field:
@@ -768,7 +772,7 @@ when isMainModule:
       else:
         echo "Unsupported kind: " & $node.kind
         discard
-    proc generateFieldLen(node: ProtoNode, field: NimNode): NimNode =
+    proc generateFieldLen(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], node: ProtoNode, field: NimNode): NimNode =
       result = newStmtList()
       let fieldDesc = newLit(getVarIntLen(node.number shl 3 or (if not node.repeated and typeMapping.hasKey(node.protoType): typeMapping[node.protoType].wire else: 2)))
       let res = newIdentNode("result")
@@ -778,23 +782,43 @@ when isMainModule:
       if typeMapping.hasKey(node.protoType):
         case typeMapping[node.protoType].wire:
         of 1:
-          result.add(quote do:
-            `res` += 8
-          )
+          if node.repeated:
+            result.add(quote do:
+              `res` += 8*`field`.len
+            )
+          else:
+            result.add(quote do:
+              `res` += 8
+            )
         of 5:
-          result.add(quote do:
-            `res` += 4
-          )
+          if node.repeated:
+            result.add(quote do:
+              `res` += 4*`field`.len
+            )
+          else:
+            result.add(quote do:
+              `res` += 4
+            )
         of 2:
-          result.add(quote do:
-            `res` += `field`.len
-          )
+          if node.repeated:
+            result.add(quote do:
+              for i in `field`:
+                `res` += i.len
+                `res` += getVarIntLen(i.len.int64)
+              `res` += `fieldDesc`*(`field`.len-1)
+            )
+          else:
+            result.add(quote do:
+              `res` += getVarIntLen(`field`.len.int64)
+              `res` += `field`.len
+            )
         of 0:
           let
             iVar = nskForVar.genSym()
             varInt = if node.repeated: nnkBracketExpr.newTree(field, iVar) else: field
+            getVarIntLen = newIdentNode("getVarIntLen")
             innerBody = quote do:
-              `res` += getVarIntLen(`varInt`)
+              `res` += `getVarIntLen`(`varInt`)
             outerBody = if node.repeated: (quote do:
               for `iVar` in 0..`field`.high:
                 `innerBody`
@@ -804,48 +828,70 @@ when isMainModule:
           echo "Unable to create code"
           #raise newException(AssertionError, "Unable to generate code, wire type '" & $typeMapping[field.protoType].wire & "' not supported")
       else:
-        result.add(quote do:
-          `res` += `field`.len
-        )
-    proc generateFieldRead(node: ProtoNode, stream, field: NimNode): NimNode =
+        if node.repeated:
+          result.add(quote do:
+            for i in `field`:
+              `res` += i.len
+          )
+        else:
+          result.add(quote do:
+            `res` += `field`.len
+          )
+    proc generateFieldRead(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], node: ProtoNode, stream, field: NimNode): NimNode =
       result = newStmtList()
       if node.repeated:
+        if typeMapping.hasKey(node.protoType) and node.protoType != "string" and node.protoType != "bytes":
+          let
+            sizeSym = genSym(nskVar)
+            protoRead = typeMapping[node.protoType].read
+          result.add(quote do:
+            var `sizeSym` = `stream`.protoReadInt64()
+            `field` = @[]
+            let endPos = `stream`.getPosition() + `sizeSym`
+            while `stream`.getPosition() < endPos:
+              `field`.add(`stream`.`protoRead`())
+          )
+        else:
+          let
+            protoRead = if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].read else: newIdentNode("read" & node.protoType.replace(".", "_"))
+            readStmt = if typeMapping.hasKey(node.protoType): quote do: `stream`.`protoRead`()
+              else: quote do: `stream`.`protoRead`(`stream`.protoReadInt64()) #TODO: This is not implemented on the writer level
+          result.add(quote do:
+            if `field` == nil:
+              `field` = @[]
+            `field`.add(`readStmt`)
+          )
+      else:
         let
-          sizeSym = genSym(nskVar)
-          protoRead = if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].read else: newIdentNode("read" & node.protoType.replace(".", "_"))
+          protoRead = if typeMapping.hasKey(node.protoType):
+            typeMapping[node.protoType].read
+          else:
+            newIdentNode("read" & node.protoType.replace(".", "_"))
           readStmt = if typeMapping.hasKey(node.protoType):
             quote do: `stream`.`protoRead`()
           else:
-            quote do: `stream`.`protoRead`(`stream`.protoReadInt64()) #TODO: This is not implemented on the writer level
+            quote do:
+              when compiles(`stream`.`protoRead`(`stream`.protoReadInt64())):
+                `stream`.`protoRead`(`stream`.protoReadInt64())
+              else:
+                `stream`.`protoRead`()
+
         result.add(quote do:
-          var `sizeSym` = `stream`.protoReadInt64()
-          `field` = @[]
-          let endPos = `stream`.getPosition() + `sizeSym`
-          while `stream`.getPosition() < endPos:
-            `field`.add(`readStmt`)
-        )
-      else:
-        let protoRead = if typeMapping.hasKey(node.protoType):
-          typeMapping[node.protoType].read
-        else:
-          newIdentNode("read" & node.protoType.replace(".", "_"))
-        result.add(quote do:
-          `field` = `stream`.`protoRead`()
+          `field` = `readStmt`
         )
 
-    proc generateFieldWrite(node: ProtoNode, stream, field: NimNode): NimNode =
+    proc generateFieldWrite(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], node: ProtoNode, stream, field: NimNode): NimNode =
       # Write field number and wire type
       result = newStmtList()
-      result.add(
-        nnkCall.newTree(
+      let fieldWrite = nnkCall.newTree(
           newIdentNode("protoWriteInt64"),
           stream,
           newLit(node.number shl 3 or (if not node.repeated and typeMapping.hasKey(node.protoType): typeMapping[node.protoType].wire else: 2))
         )
-      )
       # If the field is repeated or has a repeated wire type, write it's length
-      if node.repeated:
-        if typeMapping.hasKey(node.protoType):
+      if typeMapping.hasKey(node.protoType) and node.protoType != "string" and node.protoType != "bytes":
+        result.add(fieldWrite)
+        if node.repeated:
           case typeMapping[node.protoType].wire:
           of 1:
             # Write 64bit * len
@@ -875,37 +921,42 @@ when isMainModule:
             )
           else:
             echo "Unable to create code"
-        else:
-          # Loop through all entries and add the lengths together and write them
-          result.add(quote do:
-            var bytes = 0
-            for i in 0..`field`.high:
-              bytes += `field`[i].len
-            `stream`.protoWriteInt64(bytes)
+        let
+          iVar = nskForVar.genSym()
+          varInt = if node.repeated: nnkBracketExpr.newTree(field, iVar) else: field
+          innerBody = nnkCall.newTree(
+            typeMapping[node.protoType].write,
+            stream,
+            varInt
           )
-      #elif typeMapping.hasKey(node.protoType) and typeMapping[node.protoType].wire == 2:
-      #  result.add(
-      #    nnkCall.newTree(
-      #      newIdentNode("protoWriteInt64"),
-      #      stream,
-      #      nnkDotExpr.newTree(field, newIdentNode("len"))
-      #    )
-      #  )
-      # Write the actual field
-      let
-        iVar = nskForVar.genSym()
-        varInt = if node.repeated: nnkBracketExpr.newTree(field, iVar) else: field
-        innerBody = nnkCall.newTree(
-          if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].write else: newIdentNode("write"),
-          stream,
-          varInt
-        )
-        outerBody = if node.repeated: (quote do:
-          for `iVar` in 0..`field`.high:
-            `innerBody`
-        ) else: innerBody
-      result.add(outerBody)
-    proc generateProcs(node: ProtoNode, decls: var NimNode, impls: var NimNode) =
+          outerBody = if node.repeated: (quote do:
+            for `iVar` in 0..`field`.high:
+              `innerBody`
+          ) else: innerBody
+        result.add(outerBody)
+      else:
+        let
+          iVar = nskForVar.genSym()
+          varInt = if node.repeated: nnkBracketExpr.newTree(field, iVar) else: field
+          protoWrite = if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].write else: newEmptyNode()
+          innerBody = if typeMapping.hasKey(node.protoType):
+            quote do:
+              `fieldWrite`
+              `stream`.`protoWrite`(`varInt`)
+          else:
+            quote do:
+              `fieldWrite`
+              when compiles(`stream`.write(`varInt`, true)):
+                `stream`.write(`varInt`, true)
+              else:
+                `stream`.write(`varInt`)
+          outerBody = if node.repeated: (quote do:
+            for `iVar` in 0..`field`.high:
+              `innerBody`
+          ) else: innerBody
+        result.add(outerBody)
+
+    proc generateProcs(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], node: ProtoNode, decls: var NimNode, impls: var NimNode) =
       case node.kind:
         of Message:
           let
@@ -914,7 +965,7 @@ when isMainModule:
             readNameStr = "read" & node.messageName.replace(".", "_")
           var procDecls = quote do:
             proc `readName`(s: Stream, maxSize: int64 = 0): `messageType`
-            proc write(s: Stream, o: `messageType`)
+            proc write(s: Stream, o: `messageType`, writeSize = false)
             proc len(o: `messageType`): int
           var procImpls = quote do:
             proc `readName`(s: Stream, maxSize: int64 = 0): `messageType` =
@@ -925,27 +976,28 @@ when isMainModule:
                   wireType = fieldSpec and 0b111
                   fieldNumber = fieldSpec shr 3
                 case fieldNumber.int64:
-                echo "fnum: " & $fieldNumber & ", wtyp: " & $wireType & ", pos: " & $s.getPosition() & ", atEnd: " & $s.atEnd() & " " & `readNameStr`
-            proc write(s: Stream, o: `messageType`)
+                #echo "fnum: " & $fieldNumber & ", wtyp: " & $wireType & ", pos: " & $s.getPosition() & ", atEnd: " & $s.atEnd() & " " & `readNameStr`
+            proc write(s: Stream, o: `messageType`, writeSize = false) =
+              if writeSize:
+                s.protoWriteInt64(o.len)
             proc len(o: `messageType`): int
           # Add a body to our procedures where we can put our statements
-          procImpls[1][6] = newStmtList()
           procImpls[2][6] = newStmtList()
           for field in node.fields:
-            generateProcs(field, procDecls, procImpls)
+            generateProcs(typeMapping, field, procDecls, procImpls)
           # TODO: Add generic reader for unknown types based on wire type
           procImpls[0][6][1][1][1].add(nnkElse.newTree(nnkStmtList.newTree(nnkDiscardStmt.newTree(newEmptyNode()))))
           for enumType in node.definedEnums:
-            generateProcs(enumType, procDecls, procImpls)
+            generateProcs(typeMapping, enumType, procDecls, procImpls)
           for message in node.nested:
-            generateProcs(message, decls, impls)
+            generateProcs(typeMapping, message, decls, impls)
           decls.add procDecls
           impls.add procImpls
         of OneOf:
           let oneofName = newIdentNode(node.oneofname.replace(".", "_"))
           for oneof in node.oneof:
             impls[0][6][1][1][1].add(nnkOfBranch.newTree(newLit(oneof.number),
-              generateFieldRead(oneof, impls[1][3][1][0], nnkDotExpr.newTree(nnkDotExpr.newTree(newIdentNode("result"), oneofName), newIdentNode(oneof.name)))
+              generateFieldRead(typeMapping, oneof, impls[1][3][1][0], nnkDotExpr.newTree(nnkDotExpr.newTree(newIdentNode("result"), oneofName), newIdentNode(oneof.name)))
             ))
           var
             oneofWriteBlock = nnkCaseStmt.newTree(
@@ -957,7 +1009,7 @@ when isMainModule:
           for i in 0..node.oneof.high:
             oneofWriteBlock.add(nnkOfBranch.newTree(
                 newLit(i),
-                generateFieldWrite(node.oneof[i], impls[1][3][1][0],
+                generateFieldWrite(typeMapping, node.oneof[i], impls[1][3][1][0],
                   nnkDotExpr.newTree(nnkDotExpr.newTree(impls[1][3][2][0], oneofName), newIdentNode(node.oneof[i].name))
                 )
               )
@@ -966,7 +1018,7 @@ when isMainModule:
           for i in 0..node.oneof.high:
             oneofLenBlock.add(nnkOfBranch.newTree(
                 newLit(i),
-                generateFieldLen(node.oneof[i],
+                generateFieldLen(typeMapping, node.oneof[i],
                   nnkDotExpr.newTree(nnkDotExpr.newTree(impls[2][3][1][0], oneofName), newIdentNode(node.oneof[i].name))
                 )
               )
@@ -974,10 +1026,10 @@ when isMainModule:
           impls[2][6].add oneofLenBlock
         of Field:
           impls[0][6][1][1][1].add(nnkOfBranch.newTree(newLit(node.number),
-            generateFieldRead(node, impls[0][3][1][0], nnkDotExpr.newTree(newIdentNode("result"), newIdentNode(node.name)))
+            generateFieldRead(typeMapping, node, impls[0][3][1][0], nnkDotExpr.newTree(newIdentNode("result"), newIdentNode(node.name)))
           ))
-          impls[1][6].add(generateFieldWrite(node, impls[1][3][1][0], nnkDotExpr.newTree(impls[1][3][2][0], newIdentNode(node.name))))
-          impls[2][6].add(generateFieldLen(node, nnkDotExpr.newTree(impls[2][3][1][0], newIdentNode(node.name))))
+          impls[1][6].add(generateFieldWrite(typeMapping, node, impls[1][3][1][0], nnkDotExpr.newTree(impls[1][3][2][0], newIdentNode(node.name))))
+          impls[2][6].add(generateFieldLen(typeMapping, node, nnkDotExpr.newTree(impls[2][3][1][0], newIdentNode(node.name))))
         of Enum:
           let
             readName = newIdentNode("read" & node.enumName.replace(".", "_"))
@@ -985,21 +1037,20 @@ when isMainModule:
           decls.add quote do:
             proc `readName`(s: Stream): `enumType`
             proc write(s: Stream, o: `enumType`)
-            proc len(o: `enumType`): int
+            proc getVarIntLen(e: `enumType`): int
           impls.add quote do:
             proc `readName`(s: Stream): `enumType` =
-              s.protoReadInt64().`enumType`
+                s.protoReadInt64().`enumType`
             proc write(s: Stream, o: `enumType`) =
-              s.write(o.int64)
-            proc len(o: `enumType`): int =
-              getVarIntLen(o.int64)
-          # Add a body to our procedures where we can put our statements
+              s.protoWriteInt64(o.int64)
+            proc getVarIntLen(e: `enumType`): int =
+              getVarIntLen(e.int64)
         of ProtoDef:
           for node in node.packages:
             for message in node.messages:
-              generateProcs(message, decls, impls)
+              generateProcs(typeMapping, message, decls, impls)
             for packageEnum in node.packageEnums:
-              generateProcs(packageEnum, decls, impls)
+              generateProcs(typeMapping, packageEnum, decls, impls)
         else:
           echo "Unsupported kind: " & $node.kind
           discard
@@ -1011,7 +1062,7 @@ when isMainModule:
     var
       forwardDeclarations = newStmtList()
       implementations = newStmtList()
-    proto.generateProcs(forwardDeclarations, implementations)
+    generateProcs(typeMapping, proto, forwardDeclarations, implementations)
     return quote do:
       `typeBlock`
       `forwardDeclarations`
@@ -1034,8 +1085,25 @@ when isMainModule:
     var validTypes = protoParsed.getTypes()
     #echo validTypes
     protoParsed.verifyAndExpandTypes(validTypes)
+
+    var typeMapping = {
+      "int32": (kind: parseExpr("int32"), write: parseExpr("protoWriteint32"), read: parseExpr("protoReadint32"), wire: 0),
+      "int64": (kind: parseExpr("int64"), write: parseExpr("protoWriteint64"), read: parseExpr("protoReadint64"), wire: 0),
+      "sint32": (kind: parseExpr("int32"), write: parseExpr("protoWritesint32"), read: parseExpr("protoReadsint32"), wire: 0),
+      "sint64": (kind: parseExpr("int64"), write: parseExpr("protoWritesint64"), read: parseExpr("protoReadsint64"), wire: 0),
+      "fixed32": (kind: parseExpr("uint32"), write: parseExpr("protoWritefixed32"), read: parseExpr("protoReadfixed32"), wire: 5),
+      "fixed64": (kind: parseExpr("uint64"), write: parseExpr("protoWritefixed64"), read: parseExpr("protoReadfixed64"), wire: 1),
+      "sfixed32": (kind: parseExpr("int32"), write: parseExpr("protoWritesfixed32"), read: parseExpr("protoReadsfixed32"), wire: 5),
+      "sfixed64": (kind: parseExpr("int64"), write: parseExpr("protoWritesfixed64"), read: parseExpr("protoReadsfixed64"), wire: 1),
+      "float": (kind: parseExpr("float32"), write: parseExpr("protoWritefloat"), read: parseExpr("protoReadfloat"), wire: 5),
+      "double": (kind: parseExpr("float64"), write: parseExpr("protoWritedouble"), read: parseExpr("protoReaddouble"), wire: 1),
+      "string": (kind: parseExpr("string"), write: parseExpr("protoWritestring"), read: parseExpr("protoReadstring"), wire: 2),
+      "bytes": (kind: parseExpr("seq[uint8]"), write: parseExpr("protoWritebytes"), read: parseExpr("protoReadbytes"), wire: 2)
+    }.toTable
+
+    typeMapping.registerEnums(protoParsed)
     #echo protoParsed
-    result = generateCode(protoParsed)
+    result = generateCode(typeMapping, protoParsed)
     echo result.toStrLit
 
     #if protoParsed.valid:
@@ -1086,11 +1154,13 @@ when isMainModule:
   var test5: test_package_Double
   test5.a = @[]
   test5.a.add(test_package_Test1(a: 100))
+  test5.a.add(test_package_Test1(a: 200))
   test5.a.add(test_package_Test1(a: 500))
   test5.a.add(test_package_Test1(a: 9380))
   test5.b.url = "Hello world"
   test5.b.title = "Another string"
   test5.b.snippets = @["test1", "test2", "test3"]
+  test5.c = test_package_Corpus.IMAGES
   stream3.write(test5)
   stream3.setPosition(0)
   while not stream3.atEnd:
@@ -1103,6 +1173,7 @@ when isMainModule:
   echo test6.b.url
   echo test6.b.title
   echo test6.b.snippets
+  echo test6.c
 
 when false:
   import strutils
