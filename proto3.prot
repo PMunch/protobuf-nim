@@ -50,3 +50,8 @@ message Result {
   string title = 2;
   repeated string snippets = 3;
 }
+
+message Double {
+  repeated Test1 a = 1;
+  Result b = 2;
+}

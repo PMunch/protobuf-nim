@@ -812,13 +812,17 @@ when isMainModule:
       if node.repeated:
         let
           sizeSym = genSym(nskVar)
-          protoRead = if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].read else: newIdentNode("read" & node.protoType) 
+          protoRead = if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].read else: newIdentNode("read" & node.protoType.replace(".", "_"))
+          readStmt = if typeMapping.hasKey(node.protoType):
+            quote do: `stream`.`protoRead`()
+          else:
+            quote do: `stream`.`protoRead`(`stream`.protoReadInt64()) #TODO: This is not implemented on the writer level
         result.add(quote do:
           var `sizeSym` = `stream`.protoReadInt64()
           `field` = @[]
           let endPos = `stream`.getPosition() + `sizeSym`
           while `stream`.getPosition() < endPos:
-            `field`.add(`stream`.`protoRead`())
+            `field`.add(`readStmt`)
         )
       else:
         let protoRead = if typeMapping.hasKey(node.protoType):
@@ -907,19 +911,21 @@ when isMainModule:
           let
             readName = newIdentNode("read" & node.messageName.replace(".", "_"))
             messageType = newIdentNode(node.messageName.replace(".", "_"))
+            readNameStr = "read" & node.messageName.replace(".", "_")
           var procDecls = quote do:
-            proc `readName`(s: Stream, maxSize: int = 0): `messageType`
+            proc `readName`(s: Stream, maxSize: int64 = 0): `messageType`
             proc write(s: Stream, o: `messageType`)
             proc len(o: `messageType`): int
           var procImpls = quote do:
-            proc `readName`(s: Stream, maxSize: int = 0): `messageType` =
+            proc `readName`(s: Stream, maxSize: int64 = 0): `messageType` =
               let startPos = s.getPosition()
-              while not s.atEnd or (maxSize != 0 and s.getPosition() < startPos + maxSize):
+              while not s.atEnd and (maxSize == 0 or s.getPosition() < startPos + maxSize):
                 let
                   fieldSpec = s.protoReadInt64().uint64
                   wireType = fieldSpec and 0b111
                   fieldNumber = fieldSpec shr 3
                 case fieldNumber.int64:
+                echo "fnum: " & $fieldNumber & ", wtyp: " & $wireType & ", pos: " & $s.getPosition() & ", atEnd: " & $s.atEnd() & " " & `readNameStr`
             proc write(s: Stream, o: `messageType`)
             proc len(o: `messageType`): int
           # Add a body to our procedures where we can put our statements
@@ -1029,7 +1035,8 @@ when isMainModule:
     #echo validTypes
     protoParsed.verifyAndExpandTypes(validTypes)
     #echo protoParsed
-    return generateCode(protoParsed)
+    result = generateCode(protoParsed)
+    echo result.toStrLit
 
     #if protoParsed.valid:
     #  echo "File is valid!"
@@ -1074,6 +1081,28 @@ when isMainModule:
   echo test4.url
   echo test4.title
   echo test4.snippets
+
+  var stream3 = newStringStream()
+  var test5: test_package_Double
+  test5.a = @[]
+  test5.a.add(test_package_Test1(a: 100))
+  test5.a.add(test_package_Test1(a: 500))
+  test5.a.add(test_package_Test1(a: 9380))
+  test5.b.url = "Hello world"
+  test5.b.title = "Another string"
+  test5.b.snippets = @["test1", "test2", "test3"]
+  stream3.write(test5)
+  stream3.setPosition(0)
+  while not stream3.atEnd:
+    stdout.write stream3.readUint8().toHex() & " "
+  echo ""
+  stream3.setPosition(0)
+  var test6 = stream3.read_test_package_Double()
+  for i in test6.a:
+    echo i.a
+  echo test6.b.url
+  echo test6.b.title
+  echo test6.b.snippets
 
 when false:
   import strutils
