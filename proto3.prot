@@ -65,4 +65,8 @@ message Double {
   repeated Test1 a = 1;
   Result b = 2;
   Corpus c = 3;
+  oneof testOneOf {
+    string query = 4;
+    int32 page_number = 5;
+  }
 }

@@ -562,7 +562,6 @@ when isMainModule:
             "fixed64", "sfixed32", "sfixed64", "bool", "bytes", "enum", "float", "double", "string"]:
             if node.protoType[0] != '.':
               var depth = parent.len
-              echo validTypes
               while depth > 0:
                 if parent[0 ..< depth].join(".") & "." & node.protoType in validTypes:
                   node.protoType = parent[0 ..< depth].join(".") & "." & node.protoType
@@ -579,12 +578,7 @@ when isMainModule:
                   break fieldBlock
                 depth += 1
             ValidationAssert(false, "Type not recognized: " & parent.join(".") & "." & node.protoType)
-      #of EnumVal:
-      #  node.fieldName = parent.join(".") & "." & node.fieldName
       of Enum:
-        #var name = parent & node.enumName
-        #for enumVal in node.values:
-        #  verifyAndExpandTypes(enumVal, validTypes, name)
         node.enumName = (if parent.len != 0: parent.join(".") & "." else: "") & node.enumName
       of Oneof:
         for field in node.oneof:
@@ -654,14 +648,12 @@ when isMainModule:
   proc valid(proto: ProtoNode) =
     ValidationAssert(proto.kind == File, "Validation must take an entire ProtoFile")
     ValidationAssert(proto.syntax == "proto3", "File must follow proto3 syntax")
-    #ValidationAssert(proto.package == nil, "Package support not implemented yet")
     var validTypes: seq[string]
     for message in proto.messages:
       verifyReservedAndUnique(message)
       validTypes = validTypes.concat message.getTypes()
     for message in proto.messages:
       verifyAndExpandTypes(message, validTypes)
-    echo validTypes
 
   proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], proto: ProtoNode): NimNode {.compileTime.} =
     proc generateTypes(node: ProtoNode, parent: var NimNode) =
@@ -753,7 +745,7 @@ when isMainModule:
           else:
             generateTypes(field, parent)
             messageBlock.add(nnkIdentDefs.newTree(
-              newIdentNode(field.oneofName.replace(".", "_")),
+              newIdentNode(field.oneofName.rsplit({'.'}, 1)[1]),
               newIdentNode(field.oneofName.replace(".", "_") & "_Type"),
               newEmptyNode()
             ))
@@ -976,12 +968,10 @@ when isMainModule:
                   wireType = fieldSpec and 0b111
                   fieldNumber = fieldSpec shr 3
                 case fieldNumber.int64:
-                #echo "fnum: " & $fieldNumber & ", wtyp: " & $wireType & ", pos: " & $s.getPosition() & ", atEnd: " & $s.atEnd() & " " & `readNameStr`
             proc write(s: Stream, o: `messageType`, writeSize = false) =
               if writeSize:
                 s.protoWriteInt64(o.len)
             proc len(o: `messageType`): int
-          # Add a body to our procedures where we can put our statements
           procImpls[2][6] = newStmtList()
           for field in node.fields:
             generateProcs(typeMapping, field, procDecls, procImpls)
@@ -994,7 +984,7 @@ when isMainModule:
           decls.add procDecls
           impls.add procImpls
         of OneOf:
-          let oneofName = newIdentNode(node.oneofname.replace(".", "_"))
+          let oneofName = newIdentNode(node.oneofname.rsplit({'.'}, 1)[1])
           for oneof in node.oneof:
             impls[0][6][1][1][1].add(nnkOfBranch.newTree(newLit(oneof.number),
               generateFieldRead(typeMapping, oneof, impls[1][3][1][0], nnkDotExpr.newTree(nnkDotExpr.newTree(newIdentNode("result"), oneofName), newIdentNode(oneof.name)))
@@ -1068,12 +1058,9 @@ when isMainModule:
       `forwardDeclarations`
       `implementations`
 
-  macro protoTest(file: static[string]): untyped =
-  #block test:
-  #when false:
+  proc parseImpl(spec: string): NimNode {.compileTime.} =
     var
-      protoStr = readFile("proto3.prot")
-      protoParseRes = protofile()(protoStr)
+      protoParseRes = protofile()(spec)
       protoParsed = protoParseRes.value[0]
     let shortErr = protoParseRes.getShortError()
     if shortErr.len != 0:
@@ -1081,9 +1068,7 @@ when isMainModule:
 
     protoParsed.expandToFullDef()
 
-    #echo protoParsed
     var validTypes = protoParsed.getTypes()
-    #echo validTypes
     protoParsed.verifyAndExpandTypes(validTypes)
 
     var typeMapping = {
@@ -1102,14 +1087,18 @@ when isMainModule:
     }.toTable
 
     typeMapping.registerEnums(protoParsed)
-    #echo protoParsed
     result = generateCode(typeMapping, protoParsed)
     echo result.toStrLit
 
-    #if protoParsed.valid:
-    #  echo "File is valid!"
+  macro parseProto(spec: static[string]): untyped =
+    parseImpl(spec)
 
-  protoTest("proto3.prot")
+  macro parseProtoFile(file: static[string]): untyped =
+    var protoStr = readFile(file).string
+    parseImpl(protoStr)
+
+
+  parseProtoFile("proto3.prot")
   var t = -1234327
   echo getVarIntLen(t)
   var srepr = t.toBin(32)
@@ -1161,6 +1150,7 @@ when isMainModule:
   test5.b.title = "Another string"
   test5.b.snippets = @["test1", "test2", "test3"]
   test5.c = test_package_Corpus.IMAGES
+  test5.testOneOf = test_package_Double_testOneOf_Type(option: 0, query: "Hello World")
   stream3.write(test5)
   stream3.setPosition(0)
   while not stream3.atEnd:
@@ -1174,41 +1164,46 @@ when isMainModule:
   echo test6.b.title
   echo test6.b.snippets
   echo test6.c
+  echo test6.testOneOf.option
+  case test6.testOneOf.option:
+  of 0:
+    echo test6.testOneOf.query
+  of 1:
+    echo test6.testOneOf.page_number
 
-when false:
   import strutils
 
   var
-    stream = newStringStream()
-  stream.protoWrite 0.int64
-  assert(stream.getPosition == 1, "Wrote more than 1 byte for the value 0")
-  stream.setPosition(0)
-  assert(stream.protoReadInt64() == 0, "Read a different value than 0 for the value 0")
-  stream.setPosition(0)
-  stream.protoWrite 128.int64
-  assert(stream.getPosition == 2, "Wrote more or less than 2 bytes for the value 128")
-  stream.setPosition(0)
-  assert(stream.protoReadInt64() == 128, "Read a different value than 128 for the value 128")
-  stream.setPosition(0)
-  stream.protoWrite -128.int64
-  assert(stream.getPosition == 10, "Wrote more or less than 10 bytes for the value -128")
-  stream.setPosition(0)
-  assert(stream.protoReadInt64() == -128, "Read a different value than -128 for the value -128")
-  stream.setPosition(0)
-  stream.protoWrite 0.sint64
-  assert(stream.getPosition == 1, "Wrote more or less than 1 bytes for the value 0")
-  stream.setPosition(0)
-  assert(stream.protoReadSint64().int64 == 0, "Read a different value than 0 for the value 0")
-  stream.setPosition(0)
-  stream.protoWrite 128.sint64
-  assert(stream.getPosition == 2, "Wrote more or less than 2 bytes for the value 128")
-  stream.setPosition(0)
-  assert(stream.protoReadSint64().int64 == 128, "Read a different value than 128 for the value 128")
-  stream.setPosition(0)
-  stream.protoWrite (-128).sint64
-  assert(stream.getPosition == 2, "Wrote more or less than 2 bytes for the value -128")
-  stream.setPosition(0)
-  assert(stream.protoReadSint64().int64 == -128, "Read a different value than -128 for the value -128")
+    stream4 = newStringStream()
+  stream4.protoWriteInt64 0
+  assert(stream4.getPosition == 1, "Wrote more than 1 byte for the value 0")
+  stream4.setPosition(0)
+  assert(stream4.protoReadInt64() == 0, "Read a different value than 0 for the value 0")
+  stream4.setPosition(0)
+  stream4.protoWriteInt64 128
+  assert(stream4.getPosition == 2, "Wrote more or less than 2 bytes for the value 128")
+  stream4.setPosition(0)
+  assert(stream4.protoReadInt64() == 128, "Read a different value than 128 for the value 128")
+  stream4.setPosition(0)
+  stream4.protoWriteInt64 -128
+  assert(stream4.getPosition == 10, "Wrote more or less than 10 bytes for the value -128")
+  stream4.setPosition(0)
+  assert(stream4.protoReadInt64() == -128, "Read a different value than -128 for the value -128")
+  stream4.setPosition(0)
+  stream4.protoWriteSint64 0
+  assert(stream4.getPosition == 1, "Wrote more or less than 1 bytes for the value 0")
+  stream4.setPosition(0)
+  assert(stream4.protoReadSint64().int64 == 0, "Read a different value than 0 for the value 0")
+  stream4.setPosition(0)
+  stream4.protoWriteSint64 128
+  assert(stream4.getPosition == 2, "Wrote more or less than 2 bytes for the value 128")
+  stream4.setPosition(0)
+  assert(stream4.protoReadSint64().int64 == 128, "Read a different value than 128 for the value 128")
+  stream4.setPosition(0)
+  stream4.protoWriteSint64 (-128)
+  assert(stream4.getPosition == 2, "Wrote more or less than 2 bytes for the value -128")
+  stream4.setPosition(0)
+  assert(stream4.protoReadSint64().int64 == -128, "Read a different value than -128 for the value -128")
 
 when false:
   var
