@@ -1,0 +1,33 @@
+syntax = "proto3";
+package example;
+
+message Simple {
+  int32 number = 1;
+}
+
+
+message Complex {
+  string url = 1;
+  string title = 2;
+  repeated string snippets = 3;
+}
+
+enum Langs {
+  UNIVERSAL = 0;
+  NIM = 1;
+  C = 2;
+  CPP = 3;
+  PYTHON = 4;
+  LISP = 5;
+  ADA = 6;
+}
+
+message Combined {
+  repeated Simple simples = 1;
+  Complex complex = 2;
+  Langs language = 3;
+  oneof choice {
+    string text = 4;
+    int32 number = 5;
+  }
+}
