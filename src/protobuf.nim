@@ -229,7 +229,7 @@ when cpuEndian == littleEndian:
     result = result or (result shr 32)
     result = result - (result shr 1)
 
-  proc getVarIntLen*(num: int | int64 | int32): int =
+  proc getVarIntLen*(num: int | int64 | int32 | uint64 | uint32 | bool): int =
     ## Get's the length a number would take when written with the protobuf
     ## VarInt encoding.
     result = 1
@@ -267,6 +267,36 @@ when cpuEndian == littleEndian:
     s.protoReadInt64().int32
 
   proc protoWriteInt32*(s: Stream, x: int32) =
+    ## Similar to the ``protoWriteInt64`` procedure, but takes a 32-bit
+    ## integer instead.
+    s.protoWriteInt64(x.int64)
+
+  proc protoReadUint64*(s: Stream): uint64 =
+    ## Similar to the ``protoReadInt64`` procedure, but returns a 64-bit
+    ## unsigned integer instead.
+    s.protoReadInt64().uint64
+
+  proc protoWriteUint64*(s: Stream, x: uint64) =
+    ## Similar to the ``protoWriteInt64`` procedure, but takes a 64-bit
+    ## unsigned integer instead.
+    s.protoWriteInt64(x.int64)
+
+  proc protoReadUint32*(s: Stream): uint32 =
+    ## Similar to the ``protoReadInt32`` procedure, but returns a 32-bit
+    ## unsigned integer instead.
+    s.protoReadInt64().uint32
+
+  proc protoWriteUint32*(s: Stream, x: uint32) =
+    ## Similar to the ``protoWriteInt32`` procedure, but takes a 32-bit
+    ## unsigned integer instead.
+    s.protoWriteInt64(x.int64)
+
+  proc protoReadBool*(s: Stream): bool =
+    ## Similar to the ``protoReadInt64`` procedure, but returns a 32-bit
+    ## integer instead.
+    s.protoReadInt64().bool
+
+  proc protoWriteBool*(s: Stream, x: bool) =
     ## Similar to the ``protoWriteInt64`` procedure, but takes a 32-bit
     ## integer instead.
     s.protoWriteInt64(x.int64)
@@ -1322,12 +1352,15 @@ proc parseImpl(spec: string): NimNode {.compileTime.} =
   var typeMapping = {
     "int32": (kind: newIdentNode("int32"), write: newIdentNode("protoWriteint32"), read: newIdentNode("protoReadint32"), wire: 0),
     "int64": (kind: newIdentNode("int64"), write: newIdentNode("protoWriteint64"), read: newIdentNode("protoReadint64"), wire: 0),
+    "uint32": (kind: newIdentNode("uint32"), write: newIdentNode("protoWriteuint32"), read: newIdentNode("protoReaduint32"), wire: 0),
+    "uint64": (kind: newIdentNode("uint64"), write: newIdentNode("protoWriteuint64"), read: newIdentNode("protoReaduint64"), wire: 0),
     "sint32": (kind: newIdentNode("int32"), write: newIdentNode("protoWritesint32"), read: newIdentNode("protoReadsint32"), wire: 0),
     "sint64": (kind: newIdentNode("int64"), write: newIdentNode("protoWritesint64"), read: newIdentNode("protoReadsint64"), wire: 0),
     "fixed32": (kind: newIdentNode("uint32"), write: newIdentNode("protoWritefixed32"), read: newIdentNode("protoReadfixed32"), wire: 5),
     "fixed64": (kind: newIdentNode("uint64"), write: newIdentNode("protoWritefixed64"), read: newIdentNode("protoReadfixed64"), wire: 1),
     "sfixed32": (kind: newIdentNode("int32"), write: newIdentNode("protoWritesfixed32"), read: newIdentNode("protoReadsfixed32"), wire: 5),
     "sfixed64": (kind: newIdentNode("int64"), write: newIdentNode("protoWritesfixed64"), read: newIdentNode("protoReadsfixed64"), wire: 1),
+    "bool": (kind: newIdentNode("bool"), write: newIdentNode("protoWritebool"), read: newIdentNode("protoReadbool"), wire: 0),
     "float": (kind: newIdentNode("float32"), write: newIdentNode("protoWritefloat"), read: newIdentNode("protoReadfloat"), wire: 5),
     "double": (kind: newIdentNode("float64"), write: newIdentNode("protoWritedouble"), read: newIdentNode("protoReaddouble"), wire: 1),
     "string": (kind: newIdentNode("string"), write: newIdentNode("protoWritestring"), read: newIdentNode("protoReadstring"), wire: 2),
