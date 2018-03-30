@@ -37,12 +37,10 @@
 ##   parseProto(protoSpec)
 ##
 ##   # Create our message
-##   var msg: ExampleMessage
+##   var msg = new ExampleMessage
 ##   msg.number = 10
 ##   msg.text = "Hello world"
 ##   msg.nested = ExampleMessage_SubMessage(aField: 100)
-##   # Note that since Nim initialises objects you could also assign directly:
-##   # msg.nested.aField = 100
 ##
 ##   # Write it to a stream
 ##   var stream = newStringStream()
@@ -88,7 +86,7 @@
 ## .. code-block:: nim
 ##
 ##   type
-##     our_package_ExampleMessage = object
+##     our_package_ExampleMessage = ref object
 ##       simpleField: int32
 ##
 ## Messages also generate a reader, writer, and length procedure to read,
@@ -173,7 +171,7 @@
 ##       case option: range[0 .. 1]
 ##       of 0: firstField: int32
 ##       of 1: secondField: string
-##     our_package_ExampleMessage = object
+##     our_package_ExampleMessage = ref object
 ##       choice: our_package_ExampleMessage_choice_OneOf
 ##
 ## Limitations
@@ -436,7 +434,7 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
             newIdentNode(field.oneofName.replace(".", "_") & "_OneOf"),
             newEmptyNode()
           ))
-      currentMessage.add(nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), messageBlock))
+      currentMessage.add(nnkRefTy.newTree(nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), messageBlock)))
       parent.add(currentMessage)
       for definedEnum in node.definedEnums:
         generateTypes(definedEnum, parent)
@@ -642,12 +640,14 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
           readName = newIdentNode("read" & node.messageName.replace(".", "_"))
           messageType = newIdentNode(node.messageName.replace(".", "_"))
           readNameStr = "read" & node.messageName.replace(".", "_")
+          res = newIdentNode("result")
         var procDecls = quote do:
           proc `readName`(s: Stream, maxSize: int64 = 0): `messageType`
           proc write(s: Stream, o: `messageType`, writeSize = false)
           proc len(o: `messageType`): int
         var procImpls = quote do:
           proc `readName`(s: Stream, maxSize: int64 = 0): `messageType` =
+            `res` = new `messageType`
             let startPos = s.getPosition()
             while not s.atEnd and (maxSize == 0 or s.getPosition() < startPos + maxSize):
               let
@@ -663,7 +663,7 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         for field in node.fields:
           generateProcs(typeMapping, field, procDecls, procImpls)
         # TODO: Add generic reader for unknown types based on wire type
-        procImpls[0][6][1][1][1].add(nnkElse.newTree(nnkStmtList.newTree(nnkDiscardStmt.newTree(newEmptyNode()))))
+        procImpls[0][6][2][1][1].add(nnkElse.newTree(nnkStmtList.newTree(nnkDiscardStmt.newTree(newEmptyNode()))))
         for enumType in node.definedEnums:
           generateProcs(typeMapping, enumType, procDecls, procImpls)
         for message in node.nested:
@@ -676,7 +676,7 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
           oneofType = newIdentNode(node.oneofname.replace(".", "_") & "_Oneof")
         for i in 0..node.oneof.high:
           let oneof = node.oneof[i]
-          impls[0][6][1][1][1].add(nnkOfBranch.newTree(newLit(oneof.number),
+          impls[0][6][2][1][1].add(nnkOfBranch.newTree(newLit(oneof.number),
             nnkStmtList.newTree(
               nnkAsgn.newTree(nnkDotExpr.newTree(newIdentNode("result"), oneofName),
                 quote do: `oneofType`(option: `i`)
@@ -710,7 +710,7 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
           )
         impls[2][6].add oneofLenBlock
       of Field:
-        impls[0][6][1][1][1].add(nnkOfBranch.newTree(newLit(node.number),
+        impls[0][6][2][1][1].add(nnkOfBranch.newTree(newLit(node.number),
           generateFieldRead(typeMapping, node, impls[0][3][1][0], nnkDotExpr.newTree(newIdentNode("result"), newIdentNode(node.name)))
         ))
         impls[1][6].add(generateFieldWrite(typeMapping, node, impls[1][3][1][0], nnkDotExpr.newTree(impls[1][3][2][0], newIdentNode(node.name))))

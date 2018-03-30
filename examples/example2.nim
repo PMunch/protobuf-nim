@@ -16,7 +16,7 @@ message ExampleMessage {
 parseProto(protoSpec)
 
 # Create our message
-var msg: ExampleMessage
+var msg = new ExampleMessage
 msg.number = 10
 msg.text = "Hello world"
 msg.nested = ExampleMessage_SubMessage(aField: 100)
