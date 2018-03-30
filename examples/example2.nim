@@ -1,4 +1,4 @@
-import "../protobuf", streams
+import "../src/protobuf", streams
 
 # Define our protobuf specification and generate Nim code to use it
 const protoSpec = """

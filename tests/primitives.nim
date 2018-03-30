@@ -1,4 +1,4 @@
-import "../protobuf"
+import "../src/protobuf"
 import streams
 import strutils
 
