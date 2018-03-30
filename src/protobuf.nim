@@ -1338,7 +1338,6 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
     `forwardDeclarations`
     `implementations`
 
-import times
 proc parseImpl(spec: string): NimNode {.compileTime.} =
   var
     protoParseRes = protofile()(spec)
