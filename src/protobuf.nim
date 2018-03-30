@@ -374,21 +374,7 @@ when cpuEndian == littleEndian:
     ## A simple wrapper for reading 64-bit floats
     s.readFloat64()
 
-import "../combparser/combparser"
-import lists
-
-proc ignorefirst[T](first: StringParser[string], catch: StringParser[T]): StringParser[T] =
-  (first + catch).map(proc(input: tuple[f1: string, f2: T]): T = input.f2) / catch
-
-proc ignorelast[T](catch: StringParser[T], last: StringParser[string]): StringParser[T] =
-  (catch + last).map(proc(input: tuple[f1: T, f2: string]): T = input.f1) / catch
-
-template ignoresides(first, catch, last: typed): untyped =
-  ignorefirst(first, catch).ignorelast(last)
-
-proc andor(first, last: StringParser[string]): StringParser[string] =
-  (first + last).map(proc(input: tuple[f1, f2: string]): string = input.f1 & input.f2) /
-    (first / last)
+import combparser
 
 proc combine(list: seq[string], sep: string): string =
   result = ""
