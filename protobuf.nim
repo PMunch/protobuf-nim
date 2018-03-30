@@ -10,12 +10,55 @@
 ## built on top of the Stream interface from the ``streams`` module, meaning it
 ## can be used directly with anything that uses streams.
 ##
+## Example
+## -------
+## To wet your appetite the following example shows how this protobuf macro can
+## be used to generate the required code and read and write protobuf messages.
+## This example can also be found in the examples folder. Note that it is also
+## possible to read in the protobuf specification from a file.
+##
+## .. code-block:: nim
+##
+##   import protobuf, streams
+##
+##   # Define our protobuf specification and generate Nim code to use it
+##   const protoSpec = """
+##   syntax = "proto3";
+##
+##   message ExampleMessage {
+##     int32 number = 1;
+##     string text = 2;
+##     SubMessage nested = 3;
+##     message SubMessage {
+##       int32 a_field = 1;
+##     }
+##   }
+##   """
+##   parseProto(protoSpec)
+##
+##   # Create our message
+##   var msg: ExampleMessage
+##   msg.number = 10
+##   msg.text = "Hello world"
+##   msg.nested = ExampleMessage_SubMessage(aField: 100)
+##
+##   # Write it to a stream
+##   var stream = newStringStream()
+##   stream.write msg
+##
+##   # Read the message from the stream and echo out the data
+##   stream.setPosition(0)
+##   var readMsg = stream.readExampleMessage()
+##   echo readMsg.number
+##   echo readMsg.text
+##   echo readMsg.nested.aField
+##
 ## Generated code
 ## --------------
 ## Since all the code is generated from the macro on compile-time and not stored
 ## anywhere the generated code is made to be deterministic and easy to
 ## understand. If you would like to see the code however you can pass
-## -d:echoProtobuf switch on compile-time and the macro will output the
+## ``-d:echoProtobuf`` switch on compile-time and the macro will output the
 ## generated code.
 ##
 ## Messages
@@ -24,20 +67,28 @@
 ## replaced by underscores. So if the protobuf specification contains a package
 ## name it starts with that, then the name of the message. If the message is
 ## nested then the parent message is put between the package and the message.
-## As an example we can look at a protobuf message defined like this::
+## As an example we can look at a protobuf message defined like this:
+##
+## .. code-block:: protobuf
+##
 ##   syntax = "proto3"; // The only syntax supported
 ##   package = our.package;
 ##   message ExampleMessage {
 ##       int32 simpleField = 1;
 ##   }
+##
 ## The type generated for this message would be named
 ## ``our_package_ExampleMessage``. Since Nim is case and underscore insensitive
 ## you can of course write this with any style you desire be it camel-case,
 ## snake-case, or a mix as seen above. For this specific instance the type
-## would be::
+## would be:
+##
+## .. code-block:: nim
+##
 ##   type
 ##     our_package_ExampleMessage = object
 ##       simpleField: int32
+##
 ## Messages also generate a reader, writer, and length procedure to read,
 ## write, and get the length of a message on the wire respectively. All write
 ## procs are simply named ``write`` and are only differentiated by their types.
@@ -66,7 +117,10 @@
 ## Enums
 ## ^^^^^
 ## Enums are named the same was as messages, and are always declared as pure.
-## So an enum defined like this::
+## So an enum defined like this:
+##
+## .. code-block:: protobuf
+##
 ##   syntax = "proto3"; // The only syntax supported
 ##   package = our.package;
 ##   enum Langs {
@@ -74,10 +128,15 @@
 ##     NIM = 1;
 ##     C = 2;
 ##   }
-## Would end up with a type like this::
+##
+## Would end up with a type like this:
+##
+## .. code-block:: nim
+##
 ##   type
 ##     our_package_Langs {.pure.} = enum
 ##       UNIVERSAL = 0, NIM = 1, C = 2
+##
 ## For internal use enums also generate a reader and writer procedure. These
 ## are basically a wrapper around the reader and writer for a varint, only that
 ## they convert to and from the enum type. Using these by themselves is seldom
@@ -90,7 +149,10 @@
 ## their parent message, but with the name of the oneof field, and ``_OneOf``
 ## appended. All oneofs contain a field named ``option`` of a ranged integer
 ## from 0 to the number of options. This type is used to create an object
-## variant for each of the fields in the oneof. So a oneof defined like this::
+## variant for each of the fields in the oneof. So a oneof defined like this:
+##
+## .. code-block:: protobuf
+##
 ##   syntax = "proto3"; // The only syntax supported
 ##   package our.package;
 ##   message ExampleMessage {
@@ -99,7 +161,11 @@
 ##       string secondField = 1;
 ##     }
 ##   }
-## Will generate the following message and oneof type::
+##
+## Will generate the following message and oneof type:
+##
+## .. code-block:: nim
+##
 ##   type
 ##     our_package_ExampleMessage_choice_OneOf = object
 ##       case option: range[0 .. 1]
