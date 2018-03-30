@@ -447,7 +447,7 @@ proc strip(input: string): string =
 
 proc enumname(): StringParser[string] =
   ignoresides(comment(),
-    optwhitespace(charmatch({'A'..'Z'}))
+    optwhitespace(charmatch({'a'..'z','A'..'Z','0'..'9', '_'}))
   , comment())
 
 proc token(): StringParser[string] =
@@ -677,7 +677,7 @@ proc enumvals(): StringParser[ProtoNode] = (enumname() + ws("=") + number() + en
     result = ProtoNode(kind: EnumVal, fieldName: input[0][0][0], num: parseInt(input[0][1]))
 ).onerror("Unable to parse enumval")
 
-proc enumblock(): StringParser[ProtoNode] = (token("enum") + class() + ws("{") + enumvals().repeat(1) + ws("}")).map(
+proc enumblock(): StringParser[ProtoNode] = (token("enum") + class() + ws("{") + enumvals().repeat(1) + ws("}")).ignorelast(s(";")).map(
   proc (input: auto): ProtoNode =
     result = ProtoNode(kind: Enum, enumName: input[0][0][0][1], values: input[0][1])
 )
@@ -904,14 +904,14 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
           newIdentNode(node.name),
           nnkBracketExpr.newTree(
             newIdentNode("seq"),
-            newIdentNode(node.protoType.replace(".", "_"))
+            if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].kind else: newIdentNode(node.protoType.replace(".", "_")),
           ),
           newEmptyNode()
         ))
       else:
         parent.add(nnkIdentDefs.newTree(
           newIdentNode(node.name),
-          newIdentNode(node.protoType.replace(".", "_")),
+          if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].kind else: newIdentNode(node.protoType.replace(".", "_")),
           newEmptyNode()
         ))
     of EnumVal:
