@@ -43,6 +43,8 @@ possible to read in the protobuf specification from a file.
   msg.number = 10
   msg.text = "Hello world"
   msg.nested = ExampleMessage_SubMessage(aField: 100)
+  # Note that since Nim initialises objects you could also assign directly:
+  # msg.nested.aField = 100
 
   # Write it to a stream
   var stream = newStringStream()
