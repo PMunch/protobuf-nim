@@ -1,0 +1,5 @@
+syntax = "proto3"; // The only syntax supported
+message ExampleMessage {
+  int32 firstField = 1;
+  string secondField = 2;
+}

@@ -215,9 +215,12 @@
 ## compiler is able to do for you through it's meta-programming, but has also
 ## been highly entertaining to work on.
 
-import streams, strutils, sequtils, macros, tables
+import streams, strutils, sequtils, macros, tables, options
 import protobuf/private/ [parse, decldef, basetypes]
-export basetypes
+export basetypes, options
+
+converter toOption*[T](x: T): Option[T] =
+  some(x)
 
 type ValidationError = object of Exception
 
@@ -348,15 +351,21 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         parent.add(nnkIdentDefs.newTree(
           newIdentNode(node.name),
           nnkBracketExpr.newTree(
-            newIdentNode("seq"),
-            if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].kind else: newIdentNode(node.protoType.replace(".", "_")),
+            newIdentNode("Option"),
+            nnkBracketExpr.newTree(
+              newIdentNode("seq"),
+              if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].kind else: newIdentNode(node.protoType.replace(".", "_")),
+            )
           ),
           newEmptyNode()
         ))
       else:
         parent.add(nnkIdentDefs.newTree(
           newIdentNode(node.name),
-          if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].kind else: newIdentNode(node.protoType.replace(".", "_")),
+          nnkBracketExpr.newTree(
+            newIdentNode("Option"),
+            if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].kind else: newIdentNode(node.protoType.replace(".", "_"))
+          ),
           newEmptyNode()
         ))
     of EnumVal:
@@ -431,7 +440,10 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
           generateTypes(field, parent)
           messageBlock.add(nnkIdentDefs.newTree(
             newIdentNode(field.oneofName.rsplit({'.'}, 1)[1]),
-            newIdentNode(field.oneofName.replace(".", "_") & "_OneOf"),
+            nnkBracketExpr.newTree(
+              newIdentNode("Option"),
+              newIdentNode(field.oneofName.replace(".", "_") & "_OneOf")
+            ),
             newEmptyNode()
           ))
       currentMessage.add(nnkRefTy.newTree(nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), messageBlock)))
@@ -713,8 +725,20 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         impls[0][6][2][1][1].add(nnkOfBranch.newTree(newLit(node.number),
           generateFieldRead(typeMapping, node, impls[0][3][1][0], nnkDotExpr.newTree(newIdentNode("result"), newIdentNode(node.name)))
         ))
-        impls[1][6].add(generateFieldWrite(typeMapping, node, impls[1][3][1][0], nnkDotExpr.newTree(impls[1][3][2][0], newIdentNode(node.name))))
-        impls[2][6].add(generateFieldLen(typeMapping, node, nnkDotExpr.newTree(impls[2][3][1][0], newIdentNode(node.name))))
+        let
+          writeField = nnkDotExpr.newTree(impls[1][3][2][0], newIdentNode(node.name))
+          writeStmt = generateFieldWrite(typeMapping, node, impls[1][3][1][0], nnkCall.newTree(newIdentNode("unsafeGet"), writeField))
+        impls[1][6].add(quote do:
+          if isSome(`writeField`):
+            `writeStmt`
+        )
+        let
+          lenField = nnkDotExpr.newTree(impls[1][3][2][0], newIdentNode(node.name))
+          lenStmt = generateFieldLen(typeMapping, node, nnkCall.newTree(newIdentNode("unsafeGet"), lenField))
+        impls[2][6].add(quote do:
+            if isSome(`lenField`):
+              `lenStmt`
+        )
       of Enum:
         let
           readName = newIdentNode("read" & node.enumName.replace(".", "_"))
