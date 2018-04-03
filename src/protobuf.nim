@@ -6,9 +6,12 @@
 ## message, along with types to hold the data in your Nim program. The data
 ## types are intended to be as close as possible to what you would normally use
 ## in Nim, making it feel very natural to use these types in your program in
-## contrast to some protobuf implementations. The entire read/write structure is
-## built on top of the Stream interface from the ``streams`` module, meaning it
-## can be used directly with anything that uses streams.
+## contrast to some protobuf implementations. Protobuf 3 however has all fields
+## as optional fields, this means that the types generated have a little bit of
+## special sauce going on behind the scenes. This will be explained in a later
+## section. The entire read/write structure is built on top of the Stream
+## interface from the ``streams`` module, meaning it can be used directly with
+## anything that uses streams.
 ##
 ## Example
 ## -------
@@ -40,18 +43,19 @@
 ##   var msg = new ExampleMessage
 ##   msg.number = 10
 ##   msg.text = "Hello world"
-##   msg.nested = ExampleMessage_SubMessage(aField: 100)
+##   msg.nested = initExampleMessage_SubMessage(aField = 100)
 ##
 ##   # Write it to a stream
 ##   var stream = newStringStream()
 ##   stream.write msg
 ##
-##   # Read the message from the stream and echo out the data
+##   # Read the message from the stream and output the data, if it's all present
 ##   stream.setPosition(0)
 ##   var readMsg = stream.readExampleMessage()
-##   echo readMsg.number
-##   echo readMsg.text
-##   echo readMsg.nested.aField
+##   if readMsg.has(number, text, nested) and readMsg.nested.has(aField):
+##     echo readMsg.number
+##     echo readMsg.text
+##     echo readMsg.nested.aField
 ##
 ## Generated code
 ## --------------
@@ -60,6 +64,28 @@
 ## understand. If you would like to see the code however you can pass
 ## ``-d:echoProtobuf`` switch on compile-time and the macro will output the
 ## generated code.
+##
+## Optional fields
+## ^^^^^^^^^^^^^^^
+## As mentioned earlier protobuf 3 makes all fields optional. This means that
+## each field can either exist or not exist in a message. In many other protobuf
+## implementations you notice this by having to use special getter or setter
+## procs for field access. In Nim however we have strong meta-programming powers
+## which can hide much of this complexity for us. As can be seen in the above
+## example it looks just like normal Nim code except from one thing, the call to
+## ``has``. Whenever a field is set to something it will register it's presence
+## in the object. Then when you access the field Nim will first check if it is
+## present or not, throwing a runtime ``ValueError`` if it isn't set. If you
+## want to remove a value already set in an object you simply call ``reset``
+## with the name of the field as seen in example 3. To check if a value exists
+## or not you can call ``has`` on it as seen in the above example. Since it's a
+## varargs call you can simply add all the fields you require in a single check.
+## In the below sections we will have a look at what the protobuf macro outputs.
+## Since the actual field names are hidden behind this abstraction the following
+## sections will show what the objects "feel" like they are defined as. Notice
+## also that since the fields don't actually have these names a regular object
+## initialiser wouldn't work, therefore you have to use the "init" procs created
+## as seen in the above example.
 ##
 ## Messages
 ## ^^^^^^^^
@@ -79,9 +105,9 @@
 ##
 ## The type generated for this message would be named
 ## ``our_package_ExampleMessage``. Since Nim is case and underscore insensitive
-## you can of course write this with any style you desire be it camel-case,
+## you can of course write this with any style you desire, be it camel-case,
 ## snake-case, or a mix as seen above. For this specific instance the type
-## would be:
+## would appear to be:
 ##
 ## .. code-block:: nim
 ##
@@ -92,23 +118,23 @@
 ## Messages also generate a reader, writer, and length procedure to read,
 ## write, and get the length of a message on the wire respectively. All write
 ## procs are simply named ``write`` and are only differentiated by their types.
-## This write procedure takes three arguments, the ``Stream`` to write to, an
-## instance of the message type to write, and a boolean telling it to prepend
-## the message with a varint of it's length or not. This boolean is used for
-## internal purposes, but might also come in handy if you want to stream
-## multiple messages as described in
+## This write procedure takes two arguments plus an optional third parameter,
+## the ``Stream`` to write to, an instance of the message type to write, and a
+## boolean telling it to prepend the message with a varint of it's length or
+## not. This boolean is used for internal purposes, but might also come in handy
+## if you want to stream multiple messages as described in
 ## https://developers.google.com/protocol-buffers/docs/techniques#streaming.
 ## The read procedure is named similarily to all the ``streams`` module
 ## readers, simply "read" appended with the name of the type. So for the above
 ## message the reader would be named ``read_our_package_ExampleMessage``.
 ## Notice again how you can write it in different styles in Nim if you'd like.
 ## One could of course also create an alias for this name should it prove too
-## verbose. Analagously to the ``write`` procedure the reader also takes a
-## maxSize argument of the maximum size to read for the message before
-## returning. If the size is set to 0 the stream would be read until ``atEnd``
-## returns true. The ``len`` procedure is slightly simpler, it only takes an
-## instance of the message type and returns the size this message would take on
-## the wire, in bytes. This is used internally, but might have some
+## verbose. Analagously to the ``write`` procedure the reader also takes an
+## optional ``maxSize`` argument of the maximum size to read for the message
+## before returning. If the size is set to 0 the stream would be read until
+## ``atEnd`` returns true. The ``len`` procedure is slightly simpler, it only
+## takes an instance of the message type and returns the size this message would
+## take on the wire, in bytes. This is used internally, but might have some
 ## other applications elsewhere as well. Notice that this size might vary from
 ## one instance of the type to another as varints can have multiple sizes,
 ## repeated fields different amount of elements, and oneofs having different
@@ -116,7 +142,7 @@
 ##
 ## Enums
 ## ^^^^^
-## Enums are named the same was as messages, and are always declared as pure.
+## Enums are named the same way as messages, and are always declared as pure.
 ## So an enum defined like this:
 ##
 ## .. code-block:: protobuf
@@ -190,6 +216,10 @@
 ## existing protobuf specification you must remove these fields before being
 ## able to parse them with this library.
 ##
+## If you find yourself in need of these features then I'd suggest heading over
+## to https://github.com/oswjk/nimpb which uses the official protoc compiler
+## with an extension to parse the protobuf file.
+##
 ## Rationale
 ## ---------
 ## Some might be wondering why I've decided to create this library. After all
@@ -218,6 +248,8 @@
 import streams, strutils, sequtils, macros, tables
 import protobuf/private/ [parse, decldef, basetypes]
 export basetypes
+export macros
+export strutils
 
 type ValidationError = object of Exception
 
@@ -342,13 +374,178 @@ proc registerEnums(typeMapping: var Table[string, tuple[kind, write, read: NimNo
   else:
     discard
 
+template getField*(obj: untyped, pos: int, field: untyped, name: string): untyped =
+  if not obj.fields.contains(pos): raise newException(ValueError, "Field \"" & name & "\" isn't initialized")
+  obj.field
+
+proc findIgnoreStyle*(arr: openarray[string], field: string): int =
+  for idx, fld in arr:
+    if fld[0] == field[0]:
+      if cmpIgnoreStyle(fld[0..^1], field[0..^1]) == 0:
+        return idx
+  return -1
+
+
+{.experimental.}
+template makeDot(kind, fieldArr: untyped): untyped =
+  macro `.`(obj: kind, field: untyped): untyped =
+    let
+      fname = $field
+      newField = newIdentNode("private_" & fname)
+      idx = fieldArr.findIgnoreStyle(fname)
+    assert idx != -1, "Couldn't find field \"" & fname & "\" in object"
+    result = newTree(nnkStmtList,
+      newTree(
+        nnkCall,
+        newTree(
+          nnkDotExpr,
+          obj,
+          newIdentNode("getField")
+        ),
+        newLit(idx),
+        newField,
+        newLit(fname)
+      )
+    )
+
+  macro `.=`(obj: kind, field: untyped, value: untyped): untyped =
+    let
+      fname = $field
+      newField = newIdentNode("private_" & fname)
+      idx = fieldArr.findIgnoreStyle(fname)
+    assert idx != -1, "Couldn't find field \"" & fname & "\" in object"
+    result = newTree(nnkStmtList,
+      newTree(nnkCommand,
+        newTree(nnkDotExpr,
+          newTree(nnkDotExpr,
+            obj,
+            newIdentNode("fields")
+          ),
+          newIdentNode("incl")
+        ),
+        newLit(idx)
+      ),
+      newTree(nnkAsgn,
+        newTree(nnkCall,
+          newTree(nnkDotExpr,
+            obj,
+            newIdentNode("getField")
+          ),
+          newLit(idx),
+          newField,
+          newLit(fname)
+        ),
+        value
+      )
+    )
+
+  macro has(obj: kind, fields: varargs[untyped]): untyped =
+    result = newLit(true)
+    for field in fields:
+      let
+        fname = $field
+        newField = newIdentNode("private_" & fname)
+        idx = fieldArr.findIgnoreStyle(fname)
+      assert idx != -1, "Couldn't find field \"" & fname & "\" in object"
+      result = nnkInfix.newTree(
+        newIdentNode("and"),
+        nnkCall.newTree(
+          newIdentNode("contains"),
+          nnkDotExpr.newTree(
+            obj,
+            newIdentNode("fields")
+          ),
+          newLit(idx)
+        ),
+        result
+      )
+
+  macro reset(obj: kind, field: untyped): untyped =
+    let
+      fname = $field
+      newField = newIdentNode("private_" & fname)
+      idx = fieldArr.find(fname)
+    assert idx != -1, "Couldn't find field in object"
+    result = nnkStmtList.newTree(
+      nnkCall.newTree(
+        newIdentNode("excl"),
+        nnkDotExpr.newTree(
+          obj,
+          newIdentNode("fields")
+        ),
+        newLit(idx)
+      ),
+      nnkCall.newTree(
+        newIdentNode("reset"),
+        nnkDotExpr.newTree(
+          obj,
+          newField
+        )
+      )
+    )
+
+proc genHelpers(typeName: NimNode, fieldNames: openarray[string]): NimNode {.compileTime.} =
+  let
+    macroName = newIdentNode("init" & $typeName)
+    i = genSym(nskForVar)
+    typeStr = $typeName
+    res = newIdentNode("result")
+    fieldsSym = genSym(nskVar)
+    fieldsLen = fieldNames.len - 1
+  var
+    initialiserCases = quote do:
+      case normalize($`i`[0]):
+      else:
+        discard
+  var j = 0
+  for field in fieldNames:
+    let
+      newFieldStr = "private_" & field
+    initialiserCases.add((quote do:
+      case 0:
+      of normalize(`field`):
+        `fieldsSym`.add nnkCall.newTree(
+            nnkBracketExpr.newTree(
+              newIdentNode("range"),
+              nnkInfix.newTree(
+                newIdentNode(".."),
+                newLit(0),
+                newLit(`fieldsLen`)
+              )
+            ),
+            newLit(`j`)
+          )
+        `res`.add nnkExprColonExpr.newTree(
+          newIdentNode(`newFieldStr`),
+          `i`[1]
+        )
+    )[1])
+    j += 1
+
+  result = quote do:
+    macro `macroName`(x: varargs[untyped]): untyped =
+      `res` = nnkObjConstr.newTree(
+        newIdentNode(`typeStr`)
+      )
+      var `fieldsSym` = newNimNode(nnkCurly)
+      for `i` in x:
+        `i`.expectKind(nnkExprEqExpr)
+        `i`[0].expectKind(nnkIdent)
+        `initialiserCases`
+      `res`.add nnkExprColonExpr.newTree(
+        newIdentNode("fields"),
+        `fieldsSym`
+      )
+    makeDot(`typeName`, `fieldNames`)
+
 proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], proto: ProtoNode): NimNode {.compileTime.} =
+  var typeHelpers = newStmtList()
   proc generateTypes(node: ProtoNode, parent: var NimNode) =
     case node.kind:
     of Field:
       if node.repeated:
         parent.add(nnkIdentDefs.newTree(
-          newIdentNode(node.name),
+          newIdentNode("private_" & node.name),
           nnkBracketExpr.newTree(
             newIdentNode("seq"),
             if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].kind else: newIdentNode(node.protoType.replace(".", "_")),
@@ -357,7 +554,7 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         ))
       else:
         parent.add(nnkIdentDefs.newTree(
-          newIdentNode(node.name),
+          newIdentNode("private_" & node.name),
           if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].kind else: newIdentNode(node.protoType.replace(".", "_")),
           newEmptyNode()
         ))
@@ -399,7 +596,21 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
       var curCase = 0
       for field in node.oneof:
         var caseBody = newNimNode(nnkRecList)
-        generateTypes(field, caseBody)
+        if field.repeated:
+          caseBody.add(nnkIdentDefs.newTree(
+            newIdentNode(field.name),
+            nnkBracketExpr.newTree(
+              newIdentNode("seq"),
+              if typeMapping.hasKey(field.protoType): typeMapping[field.protoType].kind else: newIdentNode(field.protoType.replace(".", "_")),
+            ),
+            newEmptyNode()
+          ))
+        else:
+          caseBody.add(nnkIdentDefs.newTree(
+            newIdentNode(field.name),
+            if typeMapping.hasKey(field.protoType): typeMapping[field.protoType].kind else: newIdentNode(field.protoType.replace(".", "_")),
+            newEmptyNode()
+          ))
         cases.add(
           nnkOfBranch.newTree(
             newLit(curCase),
@@ -426,16 +637,38 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         newEmptyNode()
       )
       var messageBlock = nnkRecList.newNimNode()
-      for field in node.fields:
+      messageBlock.add(nnkIdentDefs.newTree(
+        newIdentNode("fields"),
+        nnkBracketExpr.newTree(
+          newIdentNode("set"),
+          nnkBracketExpr.newTree(
+            newIdentNode("range"),
+            nnkInfix.newTree(
+              newIdentNode(".."),
+              newLit(0),
+              newLit(node.fields.len - 1)
+            )
+          )
+        ),
+        newEmptyNode()
+      ))
+      var fields = newSeq[string](node.fields.len)
+      for i, field in node.fields:
         if field.kind == Field:
           generateTypes(field, messageBlock)
+          fields[i] = field.name.replace(".", "_")
         else:
           generateTypes(field, parent)
+          let
+            oneofType = field.oneofName.replace(".", "_") & "_OneOf"
+            oneofName = field.oneofName.rsplit({'.'}, 1)[1]
           messageBlock.add(nnkIdentDefs.newTree(
-            newIdentNode(field.oneofName.rsplit({'.'}, 1)[1]),
-            newIdentNode(field.oneofName.replace(".", "_") & "_OneOf"),
+            newIdentNode("private_" & oneofName),
+            newIdentNode(oneofType),
             newEmptyNode()
           ))
+          fields[i] = oneofName
+      typeHelpers.add genHelpers(newIdentNode(node.messageName.replace(".", "_")), fields)
       currentMessage.add(nnkRefTy.newTree(nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), messageBlock)))
       parent.add(currentMessage)
       for definedEnum in node.definedEnums:
@@ -516,7 +749,8 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         result.add(quote do:
           `res` += `field`.len
         )
-  proc generateFieldRead(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], node: ProtoNode, stream, field: NimNode): NimNode =
+
+  proc generateFieldRead(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], node: ProtoNode, stream, field: NimNode, parent: NimNode): NimNode =
     result = newStmtList()
     if node.repeated:
       if typeMapping.hasKey(node.protoType) and node.protoType != "string" and node.protoType != "bytes":
@@ -525,10 +759,10 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
           protoRead = typeMapping[node.protoType].read
         result.add(quote do:
           var `sizeSym` = `stream`.protoReadInt64()
-          `field` = @[]
+          `parent`.`field` = @[]
           let endPos = `stream`.getPosition() + `sizeSym`
           while `stream`.getPosition() < endPos:
-            `field`.add(`stream`.`protoRead`())
+            `parent`.`field`.add(`stream`.`protoRead`())
         )
       else:
         let
@@ -536,9 +770,9 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
           readStmt = if typeMapping.hasKey(node.protoType): quote do: `stream`.`protoRead`()
             else: quote do: `stream`.`protoRead`(`stream`.protoReadInt64()) #TODO: This is not implemented on the writer level
         result.add(quote do:
-          if `field` == nil:
-            `field` = @[]
-          `field`.add(`readStmt`)
+          if not `parent`.has(`field`):
+            `parent`.`field` = @[]
+          `parent`.`field`.add(`readStmt`)
         )
     else:
       let
@@ -555,9 +789,10 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
             else:
               `stream`.`protoRead`()
 
-      result.add(quote do:
-        `field` = `readStmt`
-      )
+      #result.add(quote do:
+      #  `field` = `readStmt`
+      #)
+      result.add(nnkAsgn.newTree(nnkDotExpr.newTree(parent, field), readStmt))
 
   proc generateFieldWrite(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], node: ProtoNode, stream, field: NimNode): NimNode =
     # Write field number and wire type
@@ -641,7 +876,6 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         let
           readName = newIdentNode("read" & node.messageName.replace(".", "_"))
           messageType = newIdentNode(node.messageName.replace(".", "_"))
-          readNameStr = "read" & node.messageName.replace(".", "_")
           res = newIdentNode("result")
         var procDecls = quote do:
           proc `readName`(s: Stream, maxSize: int64 = 0): `messageType`
@@ -683,7 +917,7 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
               nnkAsgn.newTree(nnkDotExpr.newTree(newIdentNode("result"), oneofName),
                 quote do: `oneofType`(option: `i`)
               ),
-              generateFieldRead(typeMapping, oneof, impls[1][3][1][0], nnkDotExpr.newTree(nnkDotExpr.newTree(newIdentNode("result"), oneofName), newIdentNode(oneof.name)))
+              generateFieldRead(typeMapping, oneof, impls[1][3][1][0], newIdentNode(oneof.name), nnkDotExpr.newTree(newIdentNode("result"), oneofName))
             )
           ))
         var
@@ -693,30 +927,51 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
           oneofLenBlock = nnkCaseStmt.newTree(
               nnkDotExpr.newTree(nnkDotExpr.newTree(impls[2][3][1][0], oneofName), newIdentNode("option"))
             )
+
+        let parent = impls[1][3][2][0]
         for i in 0..node.oneof.high:
           oneofWriteBlock.add(nnkOfBranch.newTree(
               newLit(i),
               generateFieldWrite(typeMapping, node.oneof[i], impls[1][3][1][0],
-                nnkDotExpr.newTree(nnkDotExpr.newTree(impls[1][3][2][0], oneofName), newIdentNode(node.oneof[i].name))
+                nnkDotExpr.newTree(nnkDotExpr.newTree(parent, oneofName), newIdentNode(node.oneof[i].name))
               )
             )
           )
-        impls[1][6].add oneofWriteBlock
+        impls[1][6].add(quote do:
+          if `parent`.has(`oneofName`):
+            `oneofWriteBlock`
+        )
+        let lenParent = impls[2][3][1][0]
         for i in 0..node.oneof.high:
           oneofLenBlock.add(nnkOfBranch.newTree(
               newLit(i),
               generateFieldLen(typeMapping, node.oneof[i],
-                nnkDotExpr.newTree(nnkDotExpr.newTree(impls[2][3][1][0], oneofName), newIdentNode(node.oneof[i].name))
+                nnkDotExpr.newTree(nnkDotExpr.newTree(lenParent, oneofName), newIdentNode(node.oneof[i].name))
               )
             )
           )
-        impls[2][6].add oneofLenBlock
+        impls[2][6].add(quote do:
+          if `lenParent`.has(`oneofName`):
+            `oneofLenBlock`
+        )
       of Field:
         impls[0][6][2][1][1].add(nnkOfBranch.newTree(newLit(node.number),
-          generateFieldRead(typeMapping, node, impls[0][3][1][0], nnkDotExpr.newTree(newIdentNode("result"), newIdentNode(node.name)))
+          generateFieldRead(typeMapping, node, impls[0][3][1][0], newIdentNode(node.name), newIdentNode("result"))
         ))
-        impls[1][6].add(generateFieldWrite(typeMapping, node, impls[1][3][1][0], nnkDotExpr.newTree(impls[1][3][2][0], newIdentNode(node.name))))
-        impls[2][6].add(generateFieldLen(typeMapping, node, nnkDotExpr.newTree(impls[2][3][1][0], newIdentNode(node.name))))
+        let
+          field = newIdentNode(node.name)
+          parent = impls[1][3][2][0]
+          lenParent = impls[2][3][1][0]
+          fieldWrite = generateFieldWrite(typeMapping, node, impls[1][3][1][0], nnkDotExpr.newTree(parent, field))
+          fieldLen = generateFieldLen(typeMapping, node, nnkDotExpr.newTree(lenParent, field))
+        impls[1][6].add(quote do:
+          if `parent`.has(`field`):
+            `fieldWrite`
+        )
+        impls[2][6].add(quote do:
+          if `lenParent`.has(`field`):
+            `fieldLen`
+        )
       of Enum:
         let
           readName = newIdentNode("read" & node.enumName.replace(".", "_"))
@@ -743,15 +998,15 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         discard
 
   var
-    typeBlock = newNimNode(nnkTypeSection)
-
-  proto.generateTypes(typeBlock)
-  var
+    typeBlock = nnkTypeSection.newTree()
     forwardDeclarations = newStmtList()
     implementations = newStmtList()
+  proto.generateTypes(typeBlock)
   generateProcs(typeMapping, proto, forwardDeclarations, implementations)
-  return quote do:
+  result = quote do:
+    {.experimental.}
     `typeBlock`
+    `typeHelpers`
     `forwardDeclarations`
     `implementations`
 

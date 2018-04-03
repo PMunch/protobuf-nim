@@ -44,13 +44,13 @@ echo "--------------------------------------------------------------------"
 echo "Complex:"
 # Create a new string stream, and an instance of our generated type
 stream = newStringStream()
-var complex = new example_Complex
+var complexObj = new example_Complex
 # Set the data fields of our instance
-complex.url = "peterme.net"
-complex.title = "Welcome to my DevLog"
-complex.snippets = @["This is a snippet", "So is this", "Even this is a snippet"]
+complexObj.url = "peterme.net"
+complexObj.title = "Welcome to my DevLog"
+complexObj.snippets = @["This is a snippet", "So is this", "Even this is a snippet"]
 # Write our message
-stream.write complex
+stream.write complexObj
 # Print out a nice representation of what's written to the stream
 echoDataStream(stream)
 # Read the message back in to our program
@@ -68,10 +68,10 @@ stream = newStringStream()
 var combined = new example_Combined
 # Set the data fields of our instance
 combined.simples = @[]
-combined.simples.add(example_Simple(number: 100))
-combined.simples.add(example_Simple(number: 200))
-combined.simples.add(example_Simple(number: 500))
-combined.simples.add(example_Simple(number: 9380))
+combined.simples.add(initexample_Simple(number = 100))
+combined.simples.add(initexample_Simple(number = 200))
+combined.simples.add(initexample_Simple(number = 500))
+combined.simples.add(initexample_Simple(number = 9380))
 combined.complex = new example_Complex
 combined.complex.url = "Hello world"
 combined.complex.title = "Another string"
@@ -79,7 +79,7 @@ combined.complex.snippets = @["snippet1", "snippet2", "snippet3"]
 combined.language = example_Langs.NIM
 #combined.choice = example_Combined_choice_OneOf(option: 0, text: "A query")
 combined.choice = example_Combined_choice_OneOf(option: 1)
-combined.choice.number = 100
+combined.choice.number = 123
 # Write our message
 stream.write(combined)
 # Print out a nice representation of what's written to the stream
@@ -93,9 +93,10 @@ echo readCombined.complex.url
 echo readCombined.complex.title
 echo readCombined.complex.snippets
 echo readCombined.language
-echo readCombined.choice.option
-case readCombined.choice.option:
-of 0:
-  echo readCombined.choice.text
-of 1:
-  echo readCombined.choice.number
+if readCombined.has(choice):
+  echo readCombined.choice.option
+  case readCombined.choice.option:
+  of 0:
+    echo readCombined.choice.text
+  of 1:
+    echo readCombined.choice.number
