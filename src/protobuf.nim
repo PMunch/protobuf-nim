@@ -219,7 +219,7 @@ import streams, strutils, sequtils, macros, tables
 import protobuf/private/ [parse, decldef, basetypes]
 export basetypes
 
-template genAccessors(name, index: untyped, fieldType, objType: typedesc): untyped =
+template genAccessors*(name, index: untyped, fieldType, objType: typedesc): untyped =
   # Access
   proc name*(obj: objType): fieldType {.noSideEffect, inline, noInit.} =
     if obj.fields.contains(index):
@@ -361,12 +361,13 @@ proc registerEnums(typeMapping: var Table[string, tuple[kind, write, read: NimNo
     discard
 
 proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], proto: ProtoNode): NimNode {.compileTime.} =
+  var typeHelpers = newStmtList()
   proc generateTypes(node: ProtoNode, parent: var NimNode) =
     case node.kind:
     of Field:
       if node.repeated:
         parent.add(nnkIdentDefs.newTree(
-          newIdentNode(node.name),
+          newIdentNode("private_" & node.name),
           nnkBracketExpr.newTree(
             newIdentNode("seq"),
             if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].kind else: newIdentNode(node.protoType.replace(".", "_")),
@@ -375,7 +376,7 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         ))
       else:
         parent.add(nnkIdentDefs.newTree(
-          newIdentNode(node.name),
+          newIdentNode("private_" & node.name),
           if typeMapping.hasKey(node.protoType): typeMapping[node.protoType].kind else: newIdentNode(node.protoType.replace(".", "_")),
           newEmptyNode()
         ))
@@ -417,7 +418,21 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
       var curCase = 0
       for field in node.oneof:
         var caseBody = newNimNode(nnkRecList)
-        generateTypes(field, caseBody)
+        if field.repeated:
+          caseBody.add(nnkIdentDefs.newTree(
+            newIdentNode(field.name),
+            nnkBracketExpr.newTree(
+              newIdentNode("seq"),
+              if typeMapping.hasKey(field.protoType): typeMapping[field.protoType].kind else: newIdentNode(field.protoType.replace(".", "_")),
+            ),
+            newEmptyNode()
+          ))
+        else:
+          caseBody.add(nnkIdentDefs.newTree(
+            newIdentNode(field.name),
+            if typeMapping.hasKey(field.protoType): typeMapping[field.protoType].kind else: newIdentNode(field.protoType.replace(".", "_")),
+            newEmptyNode()
+          ))
         cases.add(
           nnkOfBranch.newTree(
             newLit(curCase),
@@ -465,8 +480,7 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
           let innerType = if typeMapping.hasKey(field.protoType): typeMapping[field.protoType].kind else: newIdentNode(field.protoType.replace(".", "_"))
           echo "genAccessors(" & field.name & ", " & $i & ", " & (if field.repeated: "seq[" & $innerType & "]" else: $innerType) & ", " & node.messageName.replace(".", "_") & ")"
           #echo treeRepr getAst(genAccessors(newIdentNode(field.name), newIdentNode("private_" & field.name), newLit(i), newIdentNode(if field.repeated: "seq[" & $innerType & "]" else: $innerType), newIdentNode(node.messageName.replace(".", "_"))))
-          parent.add parseExpr("genAccessors(" & field.name & ", " & $i & ", " & (if field.repeated: "seq[" & $innerType & "]" else: $innerType) & ", " & node.messageName.replace(".", "_") & ")")
-          echo parent.repr
+          typeHelpers.add parseExpr("genAccessors(" & field.name & ", " & $i & ", " & (if field.repeated: "seq[" & $innerType & "]" else: $innerType) & ", " & node.messageName.replace(".", "_") & ")")
         else:
           generateTypes(field, parent)
           let
@@ -785,15 +799,14 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         discard
 
   var
-    typeBlock = newNimNode(nnkTypeSection)
-
-  proto.generateTypes(typeBlock)
-  var
+    typeBlock = nnkTypeSection.newTree()
     forwardDeclarations = newStmtList()
     implementations = newStmtList()
+  proto.generateTypes(typeBlock)
   generateProcs(typeMapping, proto, forwardDeclarations, implementations)
   return quote do:
     `typeBlock`
+    `typeHelpers`
     `forwardDeclarations`
     `implementations`
 

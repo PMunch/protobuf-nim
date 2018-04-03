@@ -44,13 +44,13 @@ echo "--------------------------------------------------------------------"
 echo "Complex:"
 # Create a new string stream, and an instance of our generated type
 stream = newStringStream()
-var complex = new example_Complex
+var complexObj = new example_Complex
 # Set the data fields of our instance
-complex.url = "peterme.net"
-complex.title = "Welcome to my DevLog"
-complex.snippets = @["This is a snippet", "So is this", "Even this is a snippet"]
+complexObj.url = "peterme.net"
+complexObj.title = "Welcome to my DevLog"
+complexObj.snippets = @["This is a snippet", "So is this", "Even this is a snippet"]
 # Write our message
-stream.write complex
+stream.write complexObj
 # Print out a nice representation of what's written to the stream
 echoDataStream(stream)
 # Read the message back in to our program
