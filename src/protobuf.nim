@@ -219,6 +219,26 @@ import streams, strutils, sequtils, macros, tables
 import protobuf/private/ [parse, decldef, basetypes]
 export basetypes
 
+template genAccessors(name, index: untyped, fieldType, objType: typedesc): untyped =
+  # Access
+  proc name*(obj: objType): fieldType {.noSideEffect, inline, noInit.} =
+    if obj.fields.contains(index):
+      return obj.`private name`
+    else:
+      raise newException(ValueError, "OptObject has not initialized field")
+
+  # Assignement
+  proc `name=`*(obj: var objType, value: fieldType) {.noSideEffect, inline.} =
+    obj.fields.incl index
+    obj.`private name` = value
+
+  # Mutable
+  proc name*(obj: var objType): var fieldType {.noSideEffect, inline.} =
+    if obj.fields.contains(index):
+      return obj.`private name`
+    else:
+      raise newException(ValueError, "OptObject has not initialized field")
+
 type ValidationError = object of Exception
 
 template ValidationAssert(statement: bool, error: string) =
@@ -424,16 +444,40 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         newEmptyNode()
       )
       var messageBlock = nnkRecList.newNimNode()
-      for field in node.fields:
+      messageBlock.add(nnkIdentDefs.newTree(
+        newIdentNode("fields"),
+        nnkBracketExpr.newTree(
+          newIdentNode("set"),
+          nnkBracketExpr.newTree(
+            newIdentNode("range"),
+            nnkInfix.newTree(
+              newIdentNode(".."),
+              newLit(0),
+              newLit(node.fields.len - 1)
+            )
+          )
+        ),
+        newEmptyNode()
+      ))
+      for i, field in node.fields:
         if field.kind == Field:
           generateTypes(field, messageBlock)
+          let innerType = if typeMapping.hasKey(field.protoType): typeMapping[field.protoType].kind else: newIdentNode(field.protoType.replace(".", "_"))
+          echo "genAccessors(" & field.name & ", " & $i & ", " & (if field.repeated: "seq[" & $innerType & "]" else: $innerType) & ", " & node.messageName.replace(".", "_") & ")"
+          #echo treeRepr getAst(genAccessors(newIdentNode(field.name), newIdentNode("private_" & field.name), newLit(i), newIdentNode(if field.repeated: "seq[" & $innerType & "]" else: $innerType), newIdentNode(node.messageName.replace(".", "_"))))
+          parent.add parseExpr("genAccessors(" & field.name & ", " & $i & ", " & (if field.repeated: "seq[" & $innerType & "]" else: $innerType) & ", " & node.messageName.replace(".", "_") & ")")
+          echo parent.repr
         else:
           generateTypes(field, parent)
+          let
+            oneofType = field.oneofName.replace(".", "_") & "_OneOf"
+            oneofName = field.oneofName.rsplit({'.'}, 1)[1]
           messageBlock.add(nnkIdentDefs.newTree(
-            newIdentNode(field.oneofName.rsplit({'.'}, 1)[1]),
-            newIdentNode(field.oneofName.replace(".", "_") & "_OneOf"),
+            newIdentNode(oneofName),
+            newIdentNode(oneofType),
             newEmptyNode()
           ))
+          echo "genAccessors(" & oneofName & ", " & $i & ", " & oneofType & ", " & node.messageName.replace(".", "_") & ")"
       currentMessage.add(nnkRefTy.newTree(nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), messageBlock)))
       parent.add(currentMessage)
       for definedEnum in node.definedEnums:
