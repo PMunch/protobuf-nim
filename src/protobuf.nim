@@ -474,6 +474,7 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         ),
         newEmptyNode()
       ))
+      var fields = newSeq[string](node.fields.len)
       for i, field in node.fields:
         if field.kind == Field:
           generateTypes(field, messageBlock)

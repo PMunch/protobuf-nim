@@ -31,24 +31,70 @@ template genAccessors(name: untyped, index: untyped, fieldType, objType: typedes
     else:
       raise newException(ValueError, "OptObject has not initialized field")
 
-macro genInitialiser(typeName: untyped, fieldNames: varargs[untyped]): untyped =
+{.experimental.}
+#template `.`(obj: NestedOpt, fname: string): string =
+#  echo fname
+#  "Hello world"
+template dotBody(obj, idx, newName, name: untyped): untyped =
+  if obj.fields.contains(idx):
+    obj.newName
+  else:
+    raise newException(ValueError, "OptObject has not initialized field " & name)
+
+template dotEqBody(obj, idx, newName, val: untyped): untyped =
+  obj.fields.incl idx
+  obj.newName = val
+
+template makeDot(kind, fieldArr: untyped): untyped =
+  macro `.`(obj: kind, fname: untyped): untyped =
+    expectKind(fname, nnkIdent)
+    let
+      name = $fname
+      newName = newIdentNode("private_" & name)
+      idx = fieldArr.find(name)
+    assert(idx != -1, "No such field in object: " & name)
+    result = getAst(dotBody(obj, idx, newName, name))
+
+  macro `.=`(obj: kind, fname: untyped, val: untyped): untyped =
+    expectKind(fname, nnkIdent)
+    let
+      name = $fname
+      newName = newIdentNode("private_" & name)
+      idx = fieldArr.find(name)
+    assert(idx != -1, "No such field in object: " & name)
+    result = getAst(dotEqBody(obj, idx, newName, val))
+
+macro genHelpers(typeName: untyped, fieldNames: static[openarray[string]]): untyped =
   let
     macroName = newIdentNode("init" & $typeName)
     i = genSym(nskForVar)
+    x = newIdentNode("field")
+    obj = newIdentNode("obj")
+    value = newIdentNode("value")
     typeStr = $typeName
     res = newIdentNode("result")
     fieldsSym = genSym(nskVar)
     fieldsLen = fieldNames.len - 1
-  var caseStmt = quote do:
-    case $`i`[0]:
-    else:
-      discard
+  var
+    initialiserCases = quote do:
+      case $`i`[0]:
+      else:
+        discard
+    setterCases = quote do:
+      case `x`:
+      else:
+        discard
+    getterCases = quote do:
+      case `x`:
+      else:
+        discard
   var j = 0
   for field in fieldNames:
-    let fieldStr = $field
-    caseStmt.add((quote do:
+    let
+      newFieldStr = "private_" & field
+    initialiserCases.add((quote do:
       case 0:
-      of `fieldStr`:
+      of `field`:
         `fieldsSym`.add nnkCall.newTree(
             nnkBracketExpr.newTree(
               newIdentNode("range"),
@@ -61,8 +107,31 @@ macro genInitialiser(typeName: untyped, fieldNames: varargs[untyped]): untyped =
             newLit(`j`)
           )
         `res`.add nnkExprColonExpr.newTree(
-          newIdentNode("private_" & `fieldStr`),
+          newIdentNode(`newFieldStr`),
           `i`[1]
+        )
+    )[1])
+    setterCases.add((quote do:
+      case 0:
+      of `field`:
+        `res`.add(
+          nnkCommand.newTree(
+            nnkDotExpr.newTree(
+              nnkDotExpr.newTree(
+                `obj`,
+                `fieldsSym`
+              ),
+              newIdentNode("incl")
+            ),
+            newLit(`j`)
+          ),
+          nnkAsgn.newTree(
+            nnkDotExpr.newTree(
+              `obj`,
+              newIdentNode(`newFieldStr`)
+            ),
+            newIdentNode("value")
+          )
         )
     )[1])
     j += 1
@@ -76,48 +145,27 @@ macro genInitialiser(typeName: untyped, fieldNames: varargs[untyped]): untyped =
       for `i` in x:
         `i`.expectKind(nnkExprEqExpr)
         `i`[0].expectKind(nnkIdent)
-        `caseStmt`
+        `initialiserCases`
       `res`.add nnkExprColonExpr.newTree(
         newIdentNode("fields"),
         `fieldsSym`
       )
+    makeDot(`typeName`, `fieldNames`)
+  echo result.repr
 
-genAccessors(fieldNull, 0, int, OptObject)
-genAccessors(fieldOne, 1, string, OptObject)
-genAccessors(fieldTwo, 2, char, OptObject)
-genAccessors(fieldThree, 3, NestedOpt, OptObject)
-genInitialiser(OptObject, fieldNull, fieldOne, fieldTwo, fieldThree)
+#genAccessors(fieldNull, 0, int, OptObject)
+#genAccessors(fieldOne, 1, string, OptObject)
+#genAccessors(fieldTwo, 2, char, OptObject)
+#genAccessors(fieldThree, 3, NestedOpt, OptObject)
+#genInitialiser(OptObject, fieldNull, fieldOne, fieldTwo, fieldThree)
 #genAccessors(fieldNull, 0, seq[int], NestedOpt)
 #genAccessors(fieldOne, 1, string, NestedOpt)
-genInitialiser(NestedOpt, fieldNull, fieldOne)
+genHelpers(NestedOpt, ["fieldNull", "fieldOne"])
+genHelpers(OptObject, ["fieldNull", "fieldOne", "fieldTwo", "fieldThree"])
 
-{.experimental.}
-#template `.`(obj: NestedOpt, fname: string): string =
-#  echo fname
-#  "Hello world"
-macro `.`(obj: NestedOpt, fname: untyped): untyped =
-  expectKind(fname, nnkIdent)
-  let
-    name = $fname
-    newName = newIdentNode("private_" & name)
-    idx = ["fieldNull", "fieldOne"].find(name)
-  assert(idx != -1, "No such field in NestedOpt: " & name)
-  result = quote do:
-    if `obj`.fields.contains(`idx`):
-      `obj`.`newName`
-    else:
-      raise newException(ValueError, "OptObject has not initialized field " & `name`)
 
-macro `.=`(obj: NestedOpt, fname: untyped, val: untyped): untyped =
-  expectKind(fname, nnkIdent)
-  let
-    name = $fname
-    newName = newIdentNode("private_" & name)
-    idx = ["fieldNull", "fieldOne"].find(name)
-  assert(idx != -1, "No such field in NestedOpt: " & name)
-  result = quote do:
-    `obj`.fields.incl `idx`
-    `obj`.`newName` = `val`
+#makeDot(NestedOpt, ["fieldNull", "fieldOne"])
+#makeDot(OptObject, ["fieldNull", "fieldOne", "fieldTwo", "fieldThree"])
 
 var q = initNestedOpt(fieldOne = "string", fieldNull = @[5])
 echo q.fieldOne
