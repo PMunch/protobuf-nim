@@ -70,29 +70,16 @@ proc number(): StringParser[string] =
 proc strip(input: string): string =
   input.strip(true, true)
 
-proc enumname(): StringParser[string] =
-  ignoresides(comment(),
-    optwhitespace(charmatch({'a'..'z','A'..'Z','0'..'9', '_'}))
-  , comment())
-
 proc token(): StringParser[string] =
   ignoresides(comment(),
     (
-      ignorefirst(charmatch(Whitespace), charmatch({'a'..'z'})) +
+      ignorefirst(charmatch(Whitespace), charmatch({'a'..'z', 'A'..'Z'})) +
       ignorelast(optional(charmatch({'a'..'z', 'A'..'Z', '0'..'9', '_'})), charmatch(Whitespace))
     ).map(combine)
   , comment())
 
 proc token(name: string): StringParser[string] =
   ignoresides(comment(), ws(name), comment()).map(strip)
-
-proc class(): StringParser[string] =
-  ignoresides(comment(),
-    (
-      ignorefirst(charmatch(Whitespace), charmatch({'A'..'Z'})) +
-      ignorelast(optional(charmatch({'a'..'z', 'A'..'Z', '0'..'9', '_'})), charmatch(Whitespace))
-    ).map(combine)
-  , comment())
 
 proc typespecifier(): StringParser[string] =
   ignoresides(comment(),
@@ -146,12 +133,12 @@ proc reserved(): StringParser[ProtoNode] =
       input[0][1]
   )
 
-proc enumvals(): StringParser[ProtoNode] = (enumname() + ws("=") + number() + endstatement()).map(
+proc enumvals(): StringParser[ProtoNode] = (token() + ws("=") + number() + endstatement()).map(
   proc (input: auto): ProtoNode =
     result = ProtoNode(kind: EnumVal, fieldName: input[0][0][0], num: parseInt(input[0][1]))
 ).onerror("Unable to parse enumval")
 
-proc enumblock(): StringParser[ProtoNode] = (token("enum") + class() + ws("{") + enumvals().repeat(1) + ws("}")).ignorelast(s(";")).map(
+proc enumblock(): StringParser[ProtoNode] = (token("enum") + token() + ws("{") + enumvals().repeat(1) + ws("}")).ignorelast(s(";")).map(
   proc (input: auto): ProtoNode =
     result = ProtoNode(kind: Enum, enumName: input[0][0][0][1], values: input[0][1])
 )
@@ -161,7 +148,7 @@ proc oneof(): StringParser[ProtoNode] = (token("oneof") + token() + ws("{") + de
     result = ProtoNode(kind: Oneof, oneofName: input[0][0][0][1], oneof: input[0][1])
 )
 
-proc messageblock(): StringParser[ProtoNode] = (token("message") + class() + ws("{") + (oneof() / declaration() / reserved() / enumblock() / token("message").flatMap(
+proc messageblock(): StringParser[ProtoNode] = (token("message") + token() + ws("{") + (oneof() / declaration() / reserved() / enumblock() / token("message").flatMap(
   proc(msg: string): StringParser[ProtoNode] =
     # Strange hack to get recursive parsers to work properly
     (proc (rest: string): Maybe[(ProtoNode, string), string] =
