@@ -21,7 +21,7 @@ possible to read in the protobuf specification from a file.
 
 .. code-block:: nim
 
-  import protobuf, streams
+  import "../src/protobuf", streams
 
   # Define our protobuf specification and generate Nim code to use it
   const protoSpec = """
@@ -39,12 +39,10 @@ possible to read in the protobuf specification from a file.
   parseProto(protoSpec)
 
   # Create our message
-  var msg: ExampleMessage
+  var msg = new ExampleMessage
   msg.number = 10
   msg.text = "Hello world"
   msg.nested = ExampleMessage_SubMessage(aField: 100)
-  # Note that since Nim initialises objects you could also assign directly:
-  # msg.nested.aField = 100
 
   # Write it to a stream
   var stream = newStringStream()
