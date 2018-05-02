@@ -360,6 +360,120 @@ proc registerEnums(typeMapping: var Table[string, tuple[kind, write, read: NimNo
   else:
     discard
 
+{.experimental.}
+template makeDot(kind, fieldArr: untyped): untyped =
+  macro `.`(obj: kind, fname: untyped): untyped =
+    expectKind(fname, nnkIdent)
+    let
+      name = $fname
+      newName = newIdentNode("private_" & name)
+      idx = fieldArr.find(name)
+    assert(idx != -1, "No such field in object: " & name)
+    return quote do:
+      (proc (): var `obj`.`newName`.type =
+        if not `obj`.fields.contains(`idx`):
+          raise newException(ValueError, "OptObject has not initialized field " & `name`)
+        return `obj`.`newName`)()
+
+  macro `.=`(obj: kind, fname: untyped, val: untyped): untyped =
+    expectKind(fname, nnkIdent)
+    let
+      name = $fname
+      newName = newIdentNode("private_" & name)
+      idx = fieldArr.find(name)
+    assert(idx != -1, "No such field in object: " & name)
+    return quote do:
+      `obj`.fields.incl `idx`
+      `obj`.`newName` = `val`
+
+proc genHelpers(typeName: NimNode, fieldNames: openarray[string]): NimNode {.compileTime.} =
+  let
+    macroName = newIdentNode("init" & $typeName)
+    i = genSym(nskForVar)
+    x = newIdentNode("field")
+    obj = newIdentNode("obj")
+    value = newIdentNode("value")
+    typeStr = $typeName
+    res = newIdentNode("result")
+    fieldsSym = genSym(nskVar)
+    fieldsLen = fieldNames.len - 1
+  var
+    initialiserCases = quote do:
+      case $`i`[0]:
+      else:
+        discard
+    setterCases = quote do:
+      case `x`:
+      else:
+        discard
+    getterCases = quote do:
+      case `x`:
+      else:
+        discard
+  var j = 0
+  for field in fieldNames:
+    let
+      newFieldStr = "private_" & field
+    initialiserCases.add((quote do:
+      case 0:
+      of `field`:
+        `fieldsSym`.add nnkCall.newTree(
+            nnkBracketExpr.newTree(
+              newIdentNode("range"),
+              nnkInfix.newTree(
+                newIdentNode(".."),
+                newLit(0),
+                newLit(`fieldsLen`)
+              )
+            ),
+            newLit(`j`)
+          )
+        `res`.add nnkExprColonExpr.newTree(
+          newIdentNode(`newFieldStr`),
+          `i`[1]
+        )
+    )[1])
+    setterCases.add((quote do:
+      case 0:
+      of `field`:
+        `res`.add(
+          nnkCommand.newTree(
+            nnkDotExpr.newTree(
+              nnkDotExpr.newTree(
+                `obj`,
+                `fieldsSym`
+              ),
+              newIdentNode("incl")
+            ),
+            newLit(`j`)
+          ),
+          nnkAsgn.newTree(
+            nnkDotExpr.newTree(
+              `obj`,
+              newIdentNode(`newFieldStr`)
+            ),
+            newIdentNode("value")
+          )
+        )
+    )[1])
+    j += 1
+
+  result = quote do:
+    macro `macroName`(x: varargs[untyped]): untyped =
+      `res` = nnkObjConstr.newTree(
+        newIdentNode(`typeStr`)
+      )
+      var `fieldsSym` = newNimNode(nnkCurly)
+      for `i` in x:
+        `i`.expectKind(nnkExprEqExpr)
+        `i`[0].expectKind(nnkIdent)
+        `initialiserCases`
+      `res`.add nnkExprColonExpr.newTree(
+        newIdentNode("fields"),
+        `fieldsSym`
+      )
+    makeDot(`typeName`, `fieldNames`)
+
 proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], proto: ProtoNode): NimNode {.compileTime.} =
   var typeHelpers = newStmtList()
   proc generateTypes(node: ProtoNode, parent: var NimNode) =
@@ -479,9 +593,10 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         if field.kind == Field:
           generateTypes(field, messageBlock)
           let innerType = if typeMapping.hasKey(field.protoType): typeMapping[field.protoType].kind else: newIdentNode(field.protoType.replace(".", "_"))
-          echo "genAccessors(" & field.name & ", " & $i & ", " & (if field.repeated: "seq[" & $innerType & "]" else: $innerType) & ", " & node.messageName.replace(".", "_") & ")"
+          fields[i] = field.name.replace(".", "_")
+          #echo "genAccessors(" & field.name & ", " & $i & ", " & (if field.repeated: "seq[" & $innerType & "]" else: $innerType) & ", " & node.messageName.replace(".", "_") & ")"
           #echo treeRepr getAst(genAccessors(newIdentNode(field.name), newIdentNode("private_" & field.name), newLit(i), newIdentNode(if field.repeated: "seq[" & $innerType & "]" else: $innerType), newIdentNode(node.messageName.replace(".", "_"))))
-          typeHelpers.add parseExpr("genAccessors(" & field.name & ", " & $i & ", " & (if field.repeated: "seq[" & $innerType & "]" else: $innerType) & ", " & node.messageName.replace(".", "_") & ")")
+          #typeHelpers.add parseExpr("genAccessors(" & field.name & ", " & $i & ", " & (if field.repeated: "seq[" & $innerType & "]" else: $innerType) & ", " & node.messageName.replace(".", "_") & ")")
         else:
           generateTypes(field, parent)
           let
@@ -492,7 +607,9 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
             newIdentNode(oneofType),
             newEmptyNode()
           ))
-          echo "genAccessors(" & oneofName & ", " & $i & ", " & oneofType & ", " & node.messageName.replace(".", "_") & ")"
+          fields[i] = field.oneOfName.replace(".", "_") & "_OneOf"
+          #echo "genAccessors(" & oneofName & ", " & $i & ", " & oneofType & ", " & node.messageName.replace(".", "_") & ")"
+      typeHelpers.add genHelpers(newIdentNode(node.messageName.replace(".", "_")), fields)
       currentMessage.add(nnkRefTy.newTree(nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), messageBlock)))
       parent.add(currentMessage)
       for definedEnum in node.definedEnums:
@@ -805,11 +922,12 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
     implementations = newStmtList()
   proto.generateTypes(typeBlock)
   generateProcs(typeMapping, proto, forwardDeclarations, implementations)
-  return quote do:
+  result = quote do:
     `typeBlock`
     `typeHelpers`
     `forwardDeclarations`
     `implementations`
+  echo result.repr
 
 proc parseImpl(protoParsed: ProtoNode): NimNode {.compileTime.} =
   var validTypes = protoParsed.getTypes()

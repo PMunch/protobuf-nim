@@ -32,9 +32,6 @@ template genAccessors(name: untyped, index: untyped, fieldType, objType: typedes
       raise newException(ValueError, "OptObject has not initialized field")
 
 {.experimental.}
-#template `.`(obj: NestedOpt, fname: string): string =
-#  echo fname
-#  "Hello world"
 template dotBody(obj, idx, newName, name: untyped): untyped =
   if obj.fields.contains(idx):
     obj.newName
@@ -64,7 +61,7 @@ template makeDot(kind, fieldArr: untyped): untyped =
     assert(idx != -1, "No such field in object: " & name)
     result = getAst(dotEqBody(obj, idx, newName, val))
 
-macro genHelpers(typeName: untyped, fieldNames: static[openarray[string]]): untyped =
+proc genHelpersImpl(typeName: NimNode, fieldNames: openarray[string]): NimNode {.compileTime.} =
   let
     macroName = newIdentNode("init" & $typeName)
     i = genSym(nskForVar)
@@ -151,8 +148,14 @@ macro genHelpers(typeName: untyped, fieldNames: static[openarray[string]]): unty
         `fieldsSym`
       )
     makeDot(`typeName`, `fieldNames`)
-  echo result.repr
 
+macro genHelpers(typeName: untyped, fieldNames: static[openarray[string]]): untyped =
+  result = newStmtList()
+  var x: seq[string] = @[]
+  for y in fieldNames:
+    x.add y
+  result.add genHelpersImpl(typeName, x)
+  echo result.repr
 #genAccessors(fieldNull, 0, int, OptObject)
 #genAccessors(fieldOne, 1, string, OptObject)
 #genAccessors(fieldTwo, 2, char, OptObject)
@@ -174,6 +177,7 @@ echo q.fieldNull
 var x = initOptObject(fieldNull = 100, fieldOne = "Hello world")
 var y = new NestedOpt
 y.fieldNull = @[32]
+y.fieldNull.add(100)
 x.fieldThree = y
 x.fieldThree.fieldNull = @[10]
 #x.fieldThree = NestedOpt(fieldNull: 10)

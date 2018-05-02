@@ -1,6 +1,9 @@
 import "../src/protobuf"
 import streams
 import strutils
+import macros
+{.experimental.}
+import typetraits
 
 const Printable = {' '..'~'}
 
