@@ -262,6 +262,8 @@ proc verifyAndExpandTypes(node: ProtoNode, validTypes: seq[string], parent: seq[
                 node.protoType = parent[0 ..< depth].join(".") & "." & node.protoType
                 break fieldBlock
               depth -= 1
+            if node.protoType in validTypes:
+              break fieldBlock
           else:
             if node.protoType[1 .. ^1] in validTypes:
               node.protoType = node.protoType[1 .. ^1]
