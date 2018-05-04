@@ -360,31 +360,62 @@ proc registerEnums(typeMapping: var Table[string, tuple[kind, write, read: NimNo
   else:
     discard
 
+template getField(obj: untyped, pos: int, field: untyped, name: string): untyped =
+  if not obj.fields.contains(pos): raise newException(ValueError, "Field \"" & name & "\" isn't initialized")
+  obj.field
+
 {.experimental.}
 template makeDot(kind, fieldArr: untyped): untyped =
-  macro `.`(obj: kind, fname: untyped): untyped =
-    expectKind(fname, nnkIdent)
+  macro `.`(obj: kind, field: untyped): untyped =
     let
-      name = $fname
-      newName = newIdentNode("private_" & name)
-      idx = fieldArr.find(name)
-    assert(idx != -1, "No such field in object: " & name)
-    return quote do:
-      (proc (): var `obj`.`newName`.type =
-        if not `obj`.fields.contains(`idx`):
-          raise newException(ValueError, "OptObject has not initialized field " & `name`)
-        return `obj`.`newName`)()
+      fname = $field
+      newField = newIdentNode("private_" & fname)
+      idx = fieldArr.find(fname)
+    assert idx != -1, "Couldn't find field in object"
+    result = newTree(nnkStmtList,
+      newTree(
+        nnkCall,
+        newTree(
+          nnkDotExpr,
+          obj,
+          newIdentNode("getField")
+        ),
+        newLit(idx),
+        newField,
+        newLit(fname)
+      )
+    )
 
-  macro `.=`(obj: kind, fname: untyped, val: untyped): untyped =
-    expectKind(fname, nnkIdent)
+  macro `.=`(obj: kind, field: untyped, value: untyped): untyped =
     let
-      name = $fname
-      newName = newIdentNode("private_" & name)
-      idx = fieldArr.find(name)
-    assert(idx != -1, "No such field in object: " & name)
-    return quote do:
-      `obj`.fields.incl `idx`
-      `obj`.`newName` = `val`
+      fname = $field
+      newField = newIdentNode("private_" & fname)
+      idx = fieldArr.find(fname)
+    assert idx != -1, "Couldn't find field in object"
+    result = newTree(nnkStmtList,
+      newTree(nnkCommand,
+        newTree(nnkDotExpr,
+          newTree(nnkDotExpr,
+            obj,
+            newIdentNode("fields")
+          ),
+          newIdentNode("incl")
+        ),
+        newLit(idx)
+      ),
+      newTree(nnkAsgn,
+        newTree(nnkCall,
+          newTree(nnkDotExpr,
+            obj,
+            newIdentNode("getField")
+          ),
+          newLit(idx),
+          newField,
+          newLit(fname)
+        ),
+        value
+      )
+    )
 
 proc genHelpers(typeName: NimNode, fieldNames: openarray[string]): NimNode {.compileTime.} =
   let
@@ -458,21 +489,25 @@ proc genHelpers(typeName: NimNode, fieldNames: openarray[string]): NimNode {.com
     )[1])
     j += 1
 
-  result = quote do:
-    macro `macroName`(x: varargs[untyped]): untyped =
-      `res` = nnkObjConstr.newTree(
-        newIdentNode(`typeStr`)
-      )
-      var `fieldsSym` = newNimNode(nnkCurly)
-      for `i` in x:
-        `i`.expectKind(nnkExprEqExpr)
-        `i`[0].expectKind(nnkIdent)
-        `initialiserCases`
-      `res`.add nnkExprColonExpr.newTree(
-        newIdentNode("fields"),
-        `fieldsSym`
-      )
-    makeDot(`typeName`, `fieldNames`)
+  #result = quote do:
+  #  macro `macroName`(x: varargs[untyped]): untyped =
+  #    `res` = nnkObjConstr.newTree(
+  #      newIdentNode(`typeStr`)
+  #    )
+  #    var `fieldsSym` = newNimNode(nnkCurly)
+  #    for `i` in x:
+  #      `i`.expectKind(nnkExprEqExpr)
+  #      `i`[0].expectKind(nnkIdent)
+  #      `initialiserCases`
+  #    `res`.add nnkExprColonExpr.newTree(
+  #      newIdentNode("fields"),
+  #      `fieldsSym`
+  #    )
+  #  #makeDot(`typeName`, `fieldNames`)
+  result = newStmtList()
+  for thing in getAst(makeDot(typeName, fieldNames)):
+    result.add thing
+  echo result.treeRepr
 
 proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], proto: ProtoNode): NimNode {.compileTime.} =
   var typeHelpers = newStmtList()
@@ -609,7 +644,8 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
           ))
           fields[i] = field.oneOfName.replace(".", "_") & "_OneOf"
           #echo "genAccessors(" & oneofName & ", " & $i & ", " & oneofType & ", " & node.messageName.replace(".", "_") & ")"
-      typeHelpers.add genHelpers(newIdentNode(node.messageName.replace(".", "_")), fields)
+      #typeHelpers.add genHelpers(newIdentNode(node.messageName.replace(".", "_")), fields)
+      typeHelpers.add getAst(makeDot(newIdentNode(node.messageName.replace(".", "_")), fields))
       currentMessage.add(nnkRefTy.newTree(nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), messageBlock)))
       parent.add(currentMessage)
       for definedEnum in node.definedEnums:
@@ -729,9 +765,13 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
             else:
               `stream`.`protoRead`()
 
-      result.add(quote do:
-        `field` = `readStmt`
-      )
+      #result.add(quote do:
+      #  `field` = `readStmt`
+      #)
+      result.add(nnkAsgn.newTree(field, readStmt))
+      echo "====================================="
+      echo result.repr
+      echo "====================================="
 
   proc generateFieldWrite(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], node: ProtoNode, stream, field: NimNode): NimNode =
     # Write field number and wire type
@@ -921,8 +961,12 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
     forwardDeclarations = newStmtList()
     implementations = newStmtList()
   proto.generateTypes(typeBlock)
+  echo "----------------------------------------"
+  echo typeBlock.repr
+  echo "----------------------------------------"
   generateProcs(typeMapping, proto, forwardDeclarations, implementations)
   result = quote do:
+    {.experimental.}
     `typeBlock`
     `typeHelpers`
     `forwardDeclarations`

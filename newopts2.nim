@@ -1,78 +1,86 @@
-type
-  MyObj = ref object
-    private_fieldA: int
-    private_hasFieldA: bool
-    private_fieldB: MyObj
-  OptObject = ref object
-    fields: set[range[0..3]]
-    private_fieldNull: int
-    private_fieldOne: string
-    private_fieldTwo: char
 
-template getField(obj: MyObj, field: static[string]): untyped =
-  when field == "fieldB":
-    obj.private_fieldB
-  elif field == "fieldA":
-    assert obj.private_hasFieldA, "Doesn't have field A"
-    obj.private_fieldA
-  else:
-    obj.private_hasFieldA
-
-template getField(obj: OptObject, field: static[string]): untyped =
-  when field == "fieldNull":
-    assert obj.fields.contains(0), "Doesn't have fieldNull"
-    obj.private_fieldNull
-  elif field == "fieldOne":
-    assert obj.fields.contains(1), "Doesn't have fieldOne"
-    obj.private_fieldOne
-  elif field == "fieldTwo":
-    assert obj.fields.contains(2), "Doesn't have fieldTwo"
-    obj.private_fieldTwo
+template getField(obj: untyped, pos: int, field: untyped, name: string): untyped =
+  if not obj.fields.contains(pos): raise newException(ValueError, "Field \"" & name & "\" isn't initialized")
+  obj.field
 
 {.experimental.}
 import macros
-macro `.`(obj: MyObj, field: untyped): untyped =
-  let fname = $field
-  quote do:
-    `obj`.getField(`fname`)
 
-macro `.`(obj: OptObject, field: untyped): untyped =
-  let fname = $field
-  quote do:
-    `obj`.getField(`fname`)
+template makeDot(kind, fieldArr: untyped): untyped =
+  macro `.`(obj: kind, field: untyped): untyped =
+    let
+      fname = $field
+      newField = newIdentNode("private_" & fname)
+      idx = fieldArr.find(fname)
+    assert idx != -1, "Couldn't find field in object"
+    result = nnkStmtList.newTree(
+      nnkCall.newTree(
+        nnkDotExpr.newTree(
+          obj,
+          newIdentNode("getField")
+        ),
+        newLit(idx),
+        newField,
+        newLit(fname)
+      )
+    )
 
-macro `.=`(obj: MyObj, field: untyped, value: untyped): untyped =
-  let fname = $field
-  if fname != "fieldA":
-    quote do:
-      `obj`.getField(`fname`) = `value`
-  else:
-    quote do:
-      `obj`.private_hasFieldA = true
-      `obj`.getField(`fname`) = `value`
+  macro `.=`(obj: kind, field: untyped, value: untyped): untyped =
+    let
+      fname = $field
+      newField = newIdentNode("private_" & fname)
+      idx = fieldArr.find(fname)
+    assert idx != -1, "Couldn't find field in object"
+    result = nnkStmtList.newTree(
+      nnkCommand.newTree(
+        nnkDotExpr.newTree(
+          nnkDotExpr.newTree(
+            obj,
+            newIdentNode("fields")
+          ),
+          newIdentNode("incl")
+        ),
+        newLit(idx)
+      ),
+      nnkAsgn.newTree(
+        nnkCall.newTree(
+          nnkDotExpr.newTree(
+            obj,
+            newIdentNode("getField")
+          ),
+          newLit(idx),
+          newField,
+          newLit(fname)
+        ),
+        value
+      )
+    )
 
-macro `.=`(obj: OptObject, field: untyped, value: untyped): untyped =
-  let
-    fname = $field
-    idx = ["fieldNull", "fieldOne", "fieldTwo"].find(fname)
-  assert idx != -1, "Couldn't find field in object"
-  quote do:
-    `obj`.fields.incl `idx`
-    `obj`.getField(`fname`) = `value`
+macro createAll(): untyped =
+  proc test(): NimNode =
+    let optObject = newIdentNode("OptObject")
+    result = quote do:
+      type
+        `optObject` = ref object
+          fields: set[range[0..2]]
+          private_fieldNull: int
+          private_fieldOne: string
+          private_fieldTwo: `optObject`
+    result = newStmtList(result, getAst(makeDot(`optObject`, ["fieldNull", "fieldOne", "fieldTwo"])))
+  return test()
 
-var x = new MyObj
-x.fieldB = new MyObj
-x.fieldB.fieldA = 10
+createAll()
 
-var y = new MyObj
-y.getField("fieldB") = new MyObj
-y.getField("fieldB").getField("hasFieldA") = true
-y.getField("fieldB").getField("fieldA") = 10
+proc createOpt(): OptObject =
+  result = new OptObject
+  result.fieldNull = 50
 
-echo x.fieldB.fieldA
-echo y.getField("fieldB").getField("fieldA")
-echo y.fieldB.fieldA
+var y = createOpt()
+echo y.fieldNull
 
 var z = new OptObject
 z.fieldNull = 42
+z.fieldTwo = new OptObject
+z.fieldTwo.fieldNull = 30
 echo z.fieldNull
+echo z.fieldTwo.fieldNull
