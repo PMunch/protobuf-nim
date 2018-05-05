@@ -19,15 +19,16 @@ parseProto(protoSpec)
 var msg = new ExampleMessage
 msg.number = 10
 msg.text = "Hello world"
-msg.nested = ExampleMessage_SubMessage(aField: 100)
+msg.nested = initExampleMessage_SubMessage(aField = 100)
 
 # Write it to a stream
 var stream = newStringStream()
 stream.write msg
 
-# Read the message from the stream and echo out the data
+# Read the message from the stream and output the data if it's all present
 stream.setPosition(0)
 var readMsg = stream.readExampleMessage()
-echo readMsg.number
-echo readMsg.text
-echo readMsg.nested.aField
+if readMsg.has(number, text, nested) and readMsg.nested.has(aField):
+  echo readMsg.number
+  echo readMsg.text
+  echo readMsg.nested.aField

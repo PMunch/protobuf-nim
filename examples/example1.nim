@@ -1,9 +1,6 @@
 import "../src/protobuf"
 import streams
 import strutils
-import macros
-{.experimental.}
-import typetraits
 
 const Printable = {' '..'~'}
 
@@ -71,10 +68,10 @@ stream = newStringStream()
 var combined = new example_Combined
 # Set the data fields of our instance
 combined.simples = @[]
-combined.simples.add(example_Simple(number: 100))
-combined.simples.add(example_Simple(number: 200))
-combined.simples.add(example_Simple(number: 500))
-combined.simples.add(example_Simple(number: 9380))
+combined.simples.add(initexample_Simple(number = 100))
+combined.simples.add(initexample_Simple(number = 200))
+combined.simples.add(initexample_Simple(number = 500))
+combined.simples.add(initexample_Simple(number = 9380))
 combined.complex = new example_Complex
 combined.complex.url = "Hello world"
 combined.complex.title = "Another string"
@@ -82,7 +79,7 @@ combined.complex.snippets = @["snippet1", "snippet2", "snippet3"]
 combined.language = example_Langs.NIM
 #combined.choice = example_Combined_choice_OneOf(option: 0, text: "A query")
 combined.choice = example_Combined_choice_OneOf(option: 1)
-combined.choice.number = 100
+combined.choice.number = 123
 # Write our message
 stream.write(combined)
 # Print out a nice representation of what's written to the stream
@@ -96,9 +93,10 @@ echo readCombined.complex.url
 echo readCombined.complex.title
 echo readCombined.complex.snippets
 echo readCombined.language
-echo readCombined.choice.option
-case readCombined.choice.option:
-of 0:
-  echo readCombined.choice.text
-of 1:
-  echo readCombined.choice.number
+if readCombined.has(choice):
+  echo readCombined.choice.option
+  case readCombined.choice.option:
+  of 0:
+    echo readCombined.choice.text
+  of 1:
+    echo readCombined.choice.number
