@@ -264,7 +264,7 @@ proc getTypes(message: ProtoNode, parent = ""): seq[string] =
       for package in message.packages:
         result = result.concat package.getTypes(parent)
     of Package:
-      let name = (if parent != "": parent & "." else: "") & (if message.packageName == nil: "" else: message.packageName)
+      let name = (if parent != "": parent & "." else: "") & (if message.packageName == "": "" else: message.packageName)
       for definedEnum in message.packageEnums:
         ValidationAssert(definedEnum.kind == Enum, "Field for defined enums contained something else than a message")
         result.add name & "." & definedEnum.enumName
@@ -324,7 +324,7 @@ proc verifyAndExpandTypes(node: ProtoNode, validTypes: seq[string], parent: seq[
       node.messageName = name.join(".")
     of ProtoDef:
       for node in node.packages:
-        var name = parent.concat(if node.packageName == nil: @[] else: node.packageName.split("."))
+        var name = parent.concat(if node.packageName == "": @[] else: node.packageName.split("."))
         for enu in node.packageEnums:
           verifyAndExpandTypes(enu, validTypes, name)
         for message in node.messages:

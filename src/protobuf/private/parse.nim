@@ -11,21 +11,21 @@ proc combine(list: seq[string]): string =
   list.combine("")
 
 proc combine(t: tuple[f1, f2: string]): string =
-  if t.f1 == nil:
+  if t.f1.len == 0:
     t.f2
-  elif t.f2 == nil:
+  elif t.f2.len == 0:
     t.f1
   else:
     t.f1 & t.f2
 
 proc combine[T](t: tuple[f1: T, f2: string]): string =
-  if t.f2 == nil:
+  if t.f2.len == 0:
     t.f1.combine()
   else:
     t.f1.combine() & t.f2
 
 proc combine[T](t: tuple[f1: string, f2: T]): string =
-  if t.f1 == nil:
+  if t.f1.len == 0:
     t.f2.combine()
   else:
     t.f1 & t.f2.combine()
@@ -105,7 +105,7 @@ proc package(): StringParser[string] = (token("package") + typespecifier() + end
 
 proc declaration(): StringParser[ProtoNode] = (optional(ws("repeated")) + typespecifier() + token() + ws("=") + number() + endstatement()).map(
   proc (input: auto): ProtoNode =
-    result = ProtoNode(kind: Field, number: parseInt(input[0][1]), name: input[0][0][0][1], protoType: input[0][0][0][0][1], repeated: input[0][0][0][0][0] != nil)
+    result = ProtoNode(kind: Field, number: parseInt(input[0][1]), name: input[0][0][0][1], protoType: input[0][0][0][0][1], repeated: input[0][0][0][0][0] != "")
 )
 
 proc reserved(): StringParser[ProtoNode] =

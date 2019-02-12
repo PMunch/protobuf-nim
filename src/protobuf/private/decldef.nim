@@ -139,7 +139,7 @@ proc `$`*(node: ProtoNode): string =
       else:
         result &= "Without own package"
     of Package:
-      result = "Package$1:\n".format(if node.packageName != nil: " with name " & node.packageName else: "")
+      result = "Package$1:\n".format(if node.packageName.len != 0: " with name " & node.packageName else: "")
       for message in node.messages:
         result &= ($message).indent(1, "  ") & "\n"
       for enumeration in node.packageEnums:

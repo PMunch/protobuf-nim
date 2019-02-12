@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.2.0"
+version       = "0.3.0"
 author        = "Peter Munch-Ellingsen"
 description   = "Pure Nim library for using protobuf in Nim. It is implemented through a string parsing macro that generate code based on the official protobuf specification."
 license       = "MIT"
@@ -8,5 +8,5 @@ srcDir        = "src"
 
 # Dependencies
 
-requires "nim >= 0.18.0"
+requires "nim >= 0.19.0"
 requires "combparser"
