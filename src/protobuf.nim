@@ -246,10 +246,11 @@
 ## been highly entertaining to work on.
 
 import streams, strutils, sequtils, macros, tables
-import protobuf/private/ [parse, decldef, basetypes]
+import protobuf/private/[parse, decldef, basetypes]
 export basetypes
 export macros
 export strutils
+export streams
 
 type ValidationError = object of Exception
 
@@ -444,7 +445,6 @@ template makeDot(kind, fieldArr: untyped): untyped =
     for field in fields:
       let
         fname = $field
-        newField = newIdentNode("private_" & fname)
         idx = fieldArr.findIgnoreStyle(fname)
       assert idx != -1, "Couldn't find field \"" & fname & "\" in object"
       result = nnkInfix.newTree(
@@ -877,24 +877,28 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
           readName = newIdentNode("read" & node.messageName.replace(".", "_"))
           messageType = newIdentNode(node.messageName.replace(".", "_"))
           res = newIdentNode("result")
+          s = newIdentNode("s")
+          o = newIdentNode("o")
+          maxSize = newIdentNode("maxSize")
+          writeSize = newIdentNode("writeSize")
         var procDecls = quote do:
-          proc `readName`(s: Stream, maxSize: int64 = 0): `messageType`
-          proc write(s: Stream, o: `messageType`, writeSize = false)
-          proc len(o: `messageType`): int
+          proc `readName`(`s`: Stream, `maxSize`: int64 = 0): `messageType`
+          proc write(`s`: Stream, `o`: `messageType`, `writeSize` = false)
+          proc len(`o`: `messageType`): int
         var procImpls = quote do:
-          proc `readName`(s: Stream, maxSize: int64 = 0): `messageType` =
+          proc `readName`(`s`: Stream, `maxSize`: int64 = 0): `messageType` =
             `res` = new `messageType`
-            let startPos = s.getPosition()
-            while not s.atEnd and (maxSize == 0 or s.getPosition() < startPos + maxSize):
+            let startPos = `s`.getPosition()
+            while not `s`.atEnd and (`maxSize` == 0 or `s`.getPosition() < startPos + `maxSize`):
               let
-                fieldSpec = s.protoReadInt64().uint64
-                wireType = fieldSpec and 0b111
+                fieldSpec = `s`.protoReadInt64().uint64
+                # wireType = fieldSpec and 0b111
                 fieldNumber = fieldSpec shr 3
               case fieldNumber.int64:
-          proc write(s: Stream, o: `messageType`, writeSize = false) =
-            if writeSize:
-              s.protoWriteInt64(o.len)
-          proc len(o: `messageType`): int
+          proc write(`s`: Stream, `o`: `messageType`, `writeSize` = false) =
+            if `writeSize`:
+              `s`.protoWriteInt64(`o`.len)
+          proc len(`o`: `messageType`): int
         procImpls[2][6] = newStmtList()
         for field in node.fields:
           generateProcs(typeMapping, field, procDecls, procImpls)
@@ -976,17 +980,20 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         let
           readName = newIdentNode("read" & node.enumName.replace(".", "_"))
           enumType = newIdentNode(node.enumName.replace(".", "_"))
+          s = newIdentNode("s")
+          o = newIdentNode("o")
+          e = newIdentNode("e")
         decls.add quote do:
-          proc `readName`(s: Stream): `enumType`
-          proc write(s: Stream, o: `enumType`)
-          proc getVarIntLen(e: `enumType`): int
+          proc `readName`(`s`: Stream): `enumType`
+          proc write(`s`: Stream, `o`: `enumType`)
+          proc getVarIntLen(`e`: `enumType`): int
         impls.add quote do:
-          proc `readName`(s: Stream): `enumType` =
-              s.protoReadInt64().`enumType`
-          proc write(s: Stream, o: `enumType`) =
-            s.protoWriteInt64(o.int64)
-          proc getVarIntLen(e: `enumType`): int =
-            getVarIntLen(e.int64)
+          proc `readName`(`s`: Stream): `enumType` =
+              `s`.protoReadInt64().`enumType`
+          proc write(`s`: Stream, `o`: `enumType`) =
+            `s`.protoWriteInt64(`o`.int64)
+          proc getVarIntLen(`e`: `enumType`): int =
+            getVarIntLen(`e`.int64)
       of ProtoDef:
         for node in node.packages:
           for message in node.messages:

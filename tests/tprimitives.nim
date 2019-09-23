@@ -1,6 +1,5 @@
 import "../src/protobuf"
 import streams
-import strutils
 
 # Some simple tests of the writing primitives
 var stream = newStringStream()
