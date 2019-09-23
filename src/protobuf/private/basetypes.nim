@@ -1,8 +1,8 @@
 import streams
 
 when cpuEndian == littleEndian:
-  proc hob(x: int64): int =
-    result = x.int
+  proc hob(x: int64): uint =
+    result = x.uint
     result = result or (result shr 1)
     result = result or (result shr 2)
     result = result or (result shr 4)
@@ -25,11 +25,11 @@ when cpuEndian == littleEndian:
     var
       bytes = x.hob shr 7
       num = x
-    s.write((num and 0x7f or (if bytes > 0: 0x80 else: 0)).uint8)
-    while bytes > 0:
+    s.write((num and 0x7f or (if bytes != 0: 0x80 else: 0)).uint8)
+    while bytes != 0:
       num = num shr 7
       bytes = bytes shr 7
-      s.write((num and 0x7f or (if bytes > 0: 0x80 else: 0)).uint8)
+      s.write((num and 0x7f or (if bytes != 0: 0x80 else: 0)).uint8)
 
   proc protoReadInt64*(s: Stream): int64 =
     ## Reads a number from the stream using the protobuf VarInt encoding
