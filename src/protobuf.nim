@@ -15,7 +15,7 @@
 ##
 ## Example
 ## -------
-## To wet your appetite the following example shows how this protobuf macro can
+## To whet your appetite the following example shows how this protobuf macro can
 ## be used to generate the required code and read and write protobuf messages.
 ## This example can also be found in the examples folder. Note that it is also
 ## possible to read in the protobuf specification from a file.
@@ -242,7 +242,7 @@
 ## interface. And finally this has been an interesting project in terms of
 ## pushing the macro system to do something most languages would simply be
 ## incapable of doing. It's not only a showcase of how much work the Nim
-## compiler is able to do for you through it's meta-programming, but has also
+## compiler is able to do for you through its meta-programming, but has also
 ## been highly entertaining to work on.
 
 import streams, strutils, sequtils, macros, tables
