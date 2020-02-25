@@ -200,6 +200,20 @@
 ##     our_package_ExampleMessage = ref object
 ##       choice: our_package_ExampleMessage_choice_OneOf
 ##
+## Exporting message definitions
+## -----------------------------
+## If you want to re-use the same message definitions in multiple places in
+## your code it's a good idea to create a module for you definition. This can
+## also be useful if you want to rename some of the fields protobuf declares,
+## or if you want to hide particular messages or create extra functionality.
+## Since protobuf uses a little bit of magic under the hood a special
+## `exportMessage` macro exists that will create the export statements you need
+## in order to export a message definition from the module that reads the
+## protobuf specification, to any module that imports it. Note however that it
+## doesn't export sub-messages or any dependent types, so be sure to export
+## those manually. Anything that's not a message (such as an enum) should be
+## exported by the normal `export` statement.
+##
 ## Limitations
 ## -----------
 ## This library is still in an early phase and has some limitations over the
@@ -1043,6 +1057,19 @@ proc parseImpl(protoParsed: ProtoNode): NimNode {.compileTime.} =
   result = generateCode(typeMapping, protoParsed)
   when defined(echoProtobuf):
     echo result.toStrLit
+
+macro exportMessage*(typename: untyped): untyped =
+  ## Creates export statements required to use a type. Useful if you want to
+  ## make a module for you protobuf specification.
+  result = newStmtList()
+  result.add nnkExportStmt.newTree typename
+  result.add nnkExportStmt.newTree newIdentNode("init" & $typename)
+  result.add nnkExportStmt.newTree newIdentNode("read" & $typename)
+  result.add nnkExportStmt.newTree newIdentNode("write")
+  result.add nnkExportStmt.newTree newIdentNode("has")
+  result.add nnkExportStmt.newTree newIdentNode(".")
+  result.add nnkExportStmt.newTree newIdentNode(".=")
+  result.add nnkExportStmt.newTree newIdentNode("getField")
 
 macro parseProto*(spec: static[string]): untyped =
   ## Parses the protobuf specification contained in the ``spec`` argument. This
