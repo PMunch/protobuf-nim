@@ -11,7 +11,7 @@ when cpuEndian == littleEndian:
     result = result or (result shr 32)
     result = result - (result shr 1)
 
-  proc getVarIntLen*(num: int | int64 | int32 | uint64 | uint32 | bool): int =
+  proc getVarIntLen*(num: int | int64 | int32 | uint64 | uint32 | bool | enum): int =
     ## Get's the length a number would take when written with the protobuf
     ## VarInt encoding.
     result = 1
