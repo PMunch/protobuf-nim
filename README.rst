@@ -75,7 +75,7 @@ implementations you notice this by having to use special getter or setter
 procs for field access. In Nim however we have strong meta-programming powers
 which can hide much of this complexity for us. As can be seen in the above
 example it looks just like normal Nim code except from one thing, the call to
-``has``. Whenever a field is set to something it will register it's presence
+``has``. Whenever a field is set to something it will register its presence
 in the object. Then when you access the field Nim will first check if it is
 present or not, throwing a runtime ``ValueError`` if it isn't set. If you
 want to remove a value already set in an object you simply call ``reset``
@@ -122,7 +122,7 @@ write, and get the length of a message on the wire respectively. All write
 procs are simply named ``write`` and are only differentiated by their types.
 This write procedure takes two arguments plus an optional third parameter,
 the ``Stream`` to write to, an instance of the message type to write, and a
-boolean telling it to prepend the message with a varint of it's length or
+boolean telling it to prepend the message with a varint of its length or
 not. This boolean is used for internal purposes, but might also come in handy
 if you want to stream multiple messages as described in
 https://developers.google.com/protocol-buffers/docs/techniques#streaming.
