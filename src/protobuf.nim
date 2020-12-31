@@ -266,7 +266,7 @@ export macros
 export strutils
 export streams
 
-type ValidationError = object of Exception
+type ValidationError = object of Defect
 
 template ValidationAssert(statement: bool, error: string) =
   if not statement:
@@ -757,11 +757,11 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
       if node.repeated:
         result.add(quote do:
           for i in `field`:
-            `res` += i.len
+            `res` += i.len + 1
         )
       else:
         result.add(quote do:
-          `res` += `field`.len
+          `res` += `field`.len + 1
         )
 
   proc generateFieldRead(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], node: ProtoNode, stream, field: NimNode, parent: NimNode): NimNode =
