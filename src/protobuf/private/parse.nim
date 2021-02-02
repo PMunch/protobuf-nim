@@ -184,7 +184,11 @@ proc protofile*(): StringParser[ProtoNode] = (syntaxline() + optional(package())
           result.imported.add message
         of Enum:
           result.package.packageEnums.add message
-        else: raise newException(AssertionDefect, "Unsupported node kind: " & $message.kind)
+        else:
+          when (NimMajor, NimMinor) < (1, 4):
+            raise newException(AssertionError, "Unsupported node kind: " & $message.kind)
+          else:
+            raise newException(AssertionDefect, "Unsupported node kind: " & $message.kind)
 )
 macro expandToFullDef(protoParsed: var ProtoNode, stringGetter: untyped): untyped =
   result = quote do:
