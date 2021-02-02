@@ -1,6 +1,9 @@
 import combparser, strutils, sequtils, macros
 import decldef
 
+when (NimMajor, NimMinor) < (1, 4):
+  type AssertionDefect = AssertionError
+
 proc combine(list: seq[string], sep: string): string =
   result = ""
   for entry in list:
@@ -184,11 +187,7 @@ proc protofile*(): StringParser[ProtoNode] = (syntaxline() + optional(package())
           result.imported.add message
         of Enum:
           result.package.packageEnums.add message
-        else:
-          when (NimMajor, NimMinor) < (1, 4):
-            raise newException(AssertionError, "Unsupported node kind: " & $message.kind)
-          else:
-            raise newException(AssertionDefect, "Unsupported node kind: " & $message.kind)
+        else: raise newException(AssertionDefect, "Unsupported node kind: " & $message.kind)
 )
 macro expandToFullDef(protoParsed: var ProtoNode, stringGetter: untyped): untyped =
   result = quote do:
