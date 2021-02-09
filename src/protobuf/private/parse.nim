@@ -1,6 +1,9 @@
 import combparser, strutils, sequtils, macros
 import decldef
 
+when (NimMajor, NimMinor) < (1, 4):
+  type AssertionDefect = AssertionError
+
 proc combine(list: seq[string], sep: string): string =
   result = ""
   for entry in list:
