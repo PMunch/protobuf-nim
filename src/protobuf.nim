@@ -535,22 +535,28 @@ proc genHelpers(typeName: NimNode, fieldNames: openarray[string]): NimNode {.com
         )
     )[1])
     j += 1
-
-  result = quote do:
-    macro `macroName`(x: varargs[untyped]): untyped =
-      `res` = nnkObjConstr.newTree(
-        newIdentNode(`typeStr`)
-      )
-      var `fieldsSym` = newNimNode(nnkCurly)
-      for `i` in x:
-        `i`.expectKind(nnkExprEqExpr)
-        `i`[0].expectKind(nnkIdent)
-        `initialiserCases`
-      `res`.add nnkExprColonExpr.newTree(
-        newIdentNode("fields"),
-        `fieldsSym`
-      )
-    makeDot(`typeName`, `fieldNames`)
+  if fieldNames.len > 0:
+    result = quote do:
+      macro `macroName`(x: varargs[untyped]): untyped =
+        `res` = nnkObjConstr.newTree(
+          newIdentNode(`typeStr`)
+        )
+        var `fieldsSym` = newNimNode(nnkCurly)
+        for `i` in x:
+          `i`.expectKind(nnkExprEqExpr)
+          `i`[0].expectKind(nnkIdent)
+          `initialiserCases`
+        `res`.add nnkExprColonExpr.newTree(
+          newIdentNode("fields"),
+          `fieldsSym`
+        )
+      makeDot(`typeName`, `fieldNames`)
+  else:
+    result = quote do:
+      macro `macroName`(x: varargs[untyped]): untyped =
+        `res` = nnkObjConstr.newTree(
+          newIdentNode(`typeStr`)
+        )
 
 proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], proto: ProtoNode): NimNode {.compileTime.} =
   var typeHelpers = newStmtList()
@@ -651,38 +657,42 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
         newEmptyNode()
       )
       var messageBlock = nnkRecList.newNimNode()
-      messageBlock.add(nnkIdentDefs.newTree(
-        newIdentNode("fields"),
-        nnkBracketExpr.newTree(
-          newIdentNode("set"),
+      if node.fields.len > 0:
+        messageBlock.add(nnkIdentDefs.newTree(
+          newIdentNode("fields"),
           nnkBracketExpr.newTree(
-            newIdentNode("range"),
-            nnkInfix.newTree(
-              newIdentNode(".."),
-              newLit(0),
-              newLit(node.fields.len - 1)
+            newIdentNode("set"),
+            nnkBracketExpr.newTree(
+              newIdentNode("range"),
+              nnkInfix.newTree(
+                newIdentNode(".."),
+                newLit(0),
+                newLit(node.fields.len - 1)
+              )
             )
-          )
-        ),
-        newEmptyNode()
-      ))
-      var fields = newSeq[string](node.fields.len)
-      for i, field in node.fields:
-        if field.kind == Field:
-          generateTypes(field, messageBlock)
-          fields[i] = field.name.replace(".", "_")
-        else:
-          generateTypes(field, parent)
-          let
-            oneofType = field.oneofName.replace(".", "_") & "_OneOf"
-            oneofName = field.oneofName.rsplit({'.'}, 1)[1]
-          messageBlock.add(nnkIdentDefs.newTree(
-            newIdentNode("private_" & oneofName),
-            newIdentNode(oneofType),
-            newEmptyNode()
-          ))
-          fields[i] = oneofName
-      typeHelpers.add genHelpers(newIdentNode(node.messageName.replace(".", "_")), fields)
+          ),
+          newEmptyNode()
+        ))
+        var fields = newSeq[string](node.fields.len)
+        for i, field in node.fields:
+          if field.kind == Field:
+            generateTypes(field, messageBlock)
+            fields[i] = field.name.replace(".", "_")
+          else:
+            generateTypes(field, parent)
+            let
+              oneofType = field.oneofName.replace(".", "_") & "_OneOf"
+              oneofName = field.oneofName.rsplit({'.'}, 1)[1]
+            messageBlock.add(nnkIdentDefs.newTree(
+              newIdentNode("private_" & oneofName),
+              newIdentNode(oneofType),
+              newEmptyNode()
+            ))
+            fields[i] = oneofName
+        typeHelpers.add genHelpers(newIdentNode(node.messageName.replace(".", "_")), fields)
+      else:
+        typeHelpers.add genHelpers(newIdentNode(node.messageName.replace(".", "_")), @[])
+
       currentMessage.add(nnkRefTy.newTree(nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), messageBlock)))
       parent.add(currentMessage)
       for definedEnum in node.definedEnums:
