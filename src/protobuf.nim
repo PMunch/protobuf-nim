@@ -553,7 +553,7 @@ proc genHelpers(typeName: NimNode, fieldNames: openarray[string]): NimNode {.com
       makeDot(`typeName`, `fieldNames`)
   else:
     result = quote do:
-      macro `macroName`(x: varargs[untyped]): untyped =
+      macro `macroName`(): untyped =
         `res` = nnkObjConstr.newTree(
           newIdentNode(`typeStr`)
         )
