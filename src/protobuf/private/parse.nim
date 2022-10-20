@@ -51,10 +51,10 @@ proc ws(value: string): StringParser[string] =
   optwhitespace(s(value))
 
 proc endcomment(): StringParser[string] =
-  ignorefirst(charmatch(Whitespace), s("//") + allbut("\n") + s("\n")).repeat(1).map(combine)
+  ignorefirst(charmatch(Whitespace), s("//") + optional(allbut("\n")) + s("\n")).repeat(1).map(combine)
 
 proc inlinecomment(): StringParser[string] =
-  ignorefirst(charmatch(Whitespace), s("/*") + allbut("*/") + s("*/")).repeat(1).map(combine)
+  ignorefirst(charmatch(Whitespace), s("/*") + optional(allbut("*/")) + s("*/")).repeat(1).map(combine)
 
 proc comment(): StringParser[string] = andor(endcomment(), inlinecomment()).repeat(1).map(combine)
 

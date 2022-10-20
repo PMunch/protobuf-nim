@@ -2,6 +2,15 @@
 syntax = "proto3";
 /* Welcome to this protobuf file*/
 // Package support not available yet
+// The next comment is empty
+
+//
+
+// And it should parse just fine
+// So should this
+
+/**/
+
 package test.package;
 import "tests/otherfile.prot";
 
