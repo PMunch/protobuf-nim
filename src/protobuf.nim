@@ -390,8 +390,9 @@ proc registerEnums(typeMapping: var Table[string, tuple[kind, write, read: NimNo
     discard
 
 template getField*(obj: untyped, pos: int, field: untyped, name: string): untyped =
-  if not obj.fields.contains(pos): raise newException(ValueError, "Field \"" & name & "\" isn't initialized")
-  obj.field
+  let objCache = obj # Do this to avoid side-effects
+  if not objCache.fields.contains(pos): raise newException(ValueError, "Field \"" & name & "\" isn't initialized")
+  objCache.field
 
 proc findIgnoreStyle*(arr: openarray[string], field: string): int =
   for idx, fld in arr:
@@ -428,12 +429,20 @@ template makeDot(kind, fieldArr: untyped): untyped =
       fname = $field
       newField = newIdentNode("private_" & fname)
       idx = fieldArr.findIgnoreStyle(fname)
+      objCache = genSym(nskLet)
     assert idx != -1, "Couldn't find field \"" & fname & "\" in object"
     result = newTree(nnkStmtList,
+      nnkLetSection.newTree(
+        nnkIdentDefs.newTree(
+          objCache,
+          newEmptyNode(),
+          obj
+        )
+      ),
       newTree(nnkCommand,
         newTree(nnkDotExpr,
           newTree(nnkDotExpr,
-            obj,
+            objCache,
             newIdentNode("fields")
           ),
           newIdentNode("incl")
@@ -443,7 +452,7 @@ template makeDot(kind, fieldArr: untyped): untyped =
       newTree(nnkAsgn,
         newTree(nnkCall,
           newTree(nnkDotExpr,
-            obj,
+            objCache,
             newIdentNode("getField")
           ),
           newLit(idx),
@@ -479,12 +488,20 @@ template makeDot(kind, fieldArr: untyped): untyped =
       fname = $field
       newField = newIdentNode("private_" & fname)
       idx = fieldArr.find(fname)
+      objCache = genSym(nskLet)
     assert idx != -1, "Couldn't find field in object"
     result = nnkStmtList.newTree(
+      nnkLetSection.newTree(
+        nnkIdentDefs.newTree(
+          objCache,
+          newEmptyNode(),
+          obj
+        )
+      ),
       nnkCall.newTree(
         newIdentNode("excl"),
         nnkDotExpr.newTree(
-          obj,
+          objCache,
           newIdentNode("fields")
         ),
         newLit(idx)
@@ -492,7 +509,7 @@ template makeDot(kind, fieldArr: untyped): untyped =
       nnkCall.newTree(
         newIdentNode("reset"),
         nnkDotExpr.newTree(
-          obj,
+          objCache,
           newField
         )
       )
