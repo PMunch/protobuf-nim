@@ -784,13 +784,14 @@ proc generateCode(typeMapping: Table[string, tuple[kind, write, read: NimNode, w
       if node.repeated:
         result.add(quote do:
           for i in `field`:
-            let len = i.len
-            `res` += len + getVarIntLen(len)
+            `res` += i.len
+            `res` += getVarIntLen(i.len.int64)
+          `res` += `fieldDesc`*(`field`.len-1)
         )
       else:
         result.add(quote do:
-          let len = `field`.len
-          `res` += len + getVarIntLen(len)
+          `res` += getVarIntLen(`field`.len.int64)
+          `res` += `field`.len
         )
 
   proc generateFieldRead(typeMapping: Table[string, tuple[kind, write, read: NimNode, wire: int]], node: ProtoNode, stream, field: NimNode, parent: NimNode): NimNode =
