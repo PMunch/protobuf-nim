@@ -532,7 +532,7 @@ proc genHelpers(typeName: NimNode, fieldNames: openarray[string]): NimNode {.com
   for field in fieldNames:
     let
       newFieldStr = "private_" & field
-    initialiserCases.add((quote do:
+    initialiserCases.insert(1, (quote do:
       case 0:
       of normalize(`field`):
         `fieldsSym`.add nnkCall.newTree(
